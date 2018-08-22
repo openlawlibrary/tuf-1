@@ -153,7 +153,7 @@ def _generate_and_write_metadata(rolename, metadata_filename,
 
     metadata = generate_targets_metadata(targets_directory, roleinfo['paths'],
         roleinfo['version'], roleinfo['expires'], roleinfo['delegations'],
-        consistent_snapshot)
+        roleinfo.get('custom'), consistent_snapshot)
 
   # Before writing 'rolename' to disk, automatically increment its version
   # number (if 'increment_version_number' is True) so that the caller does not
@@ -1327,7 +1327,7 @@ def generate_root_metadata(version, expiration_date, consistent_snapshot,
 
 
 def generate_targets_metadata(targets_directory, target_files, version,
-    expiration_date, delegations=None, write_consistent_targets=False):
+    expiration_date, delegations=None, custom_info=None, write_consistent_targets=False):
   """
   <Purpose>
     Generate the targets metadata object. The targets in 'target_files' must
@@ -1403,9 +1403,11 @@ def generate_targets_metadata(targets_directory, target_files, version,
 
   # Ensure the user is aware of a non-existent 'target_directory', and convert
   # it to its abosolute path, if it exists.
-  targets_directory = _check_directory(targets_directory)
+  # we don't want this to be checked
+  # targets_directory = _check_directory(targets_directory)
 
   # Generate the fileinfo of all the target files listed in 'target_files'.
+  # We don't need this a bunch of this
   for target, custom in six.iteritems(target_files):
 
     # The root-most folder of the targets directory should not be included in
@@ -1415,13 +1417,13 @@ def generate_targets_metadata(targets_directory, target_files, version,
 
     # Note: join() discards 'targets_directory' if 'target' contains a leading
     # path separator (i.e., is treated as an absolute path).
-    target_path = os.path.join(targets_directory, target.lstrip(os.sep))
+    #target_path = os.path.join(targets_directory, target.lstrip(os.sep))
 
     # Ensure all target files listed in 'target_files' exist.  If just one of
     # these files does not exist, raise an exception.
-    if not os.path.exists(target_path):
-      raise securesystemslib.exceptions.Error(repr(target_path) + ' cannot'
-        ' be read.  Unable to generate targets metadata.')
+    # if not os.path.exists(target_path):
+    #   raise securesystemslib.exceptions.Error(repr(target_path) + ' cannot'
+    #     ' be read.  Unable to generate targets metadata.')
 
     # Add 'custom' if it has been provided.  Custom data about the target is
     # optional and will only be included in metadata (i.e., a 'custom' field in
@@ -1430,8 +1432,7 @@ def generate_targets_metadata(targets_directory, target_files, version,
     if len(custom):
       custom_data = custom
 
-    filedict[relative_targetpath.replace('\\', '/').lstrip('/')] = \
-      get_metadata_fileinfo(target_path, custom_data)
+    filedict[relative_targetpath] = custom_data
 
     # Copy 'target_path' to 'digest_target' if consistent hashing is enabled.
     if write_consistent_targets:
@@ -1443,7 +1444,7 @@ def generate_targets_metadata(targets_directory, target_files, version,
 
   # Generate the targets metadata object.
   targets_metadata = tuf.formats.TargetsFile.make_metadata(version,
-      expiration_date, filedict, delegations)
+      expiration_date, filedict, delegations, custom_info)
 
   return targets_metadata
 

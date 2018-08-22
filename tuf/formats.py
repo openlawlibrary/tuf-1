@@ -237,10 +237,7 @@ HASHDICT_SCHEMA = SCHEMA.DictOf(
 # and sha512 may be computed for the same file and stored).
 FILEINFO_SCHEMA = SCHEMA.Object(
   object_name = 'FILEINFO_SCHEMA',
-  length = LENGTH_SCHEMA,
-  hashes = HASHDICT_SCHEMA,
-  version = SCHEMA.Optional(METADATAVERSION_SCHEMA),
-  custom = SCHEMA.Optional(SCHEMA.Object()))
+  commit = SCHEMA.AnyString())
 
 # A dict holding the information for a particular target / file.  The dict keys
 # hold the relative file paths, and the dict values the corresponding file
@@ -633,7 +630,7 @@ class SnapshotFile(MetaFile):
 
 
 class TargetsFile(MetaFile):
-  def __init__(self, version, expires, filedict=None, delegations=None):
+  def __init__(self, version, expires, filedict=None, delegations=None, custom=None):
     if filedict is None:
       filedict = {}
     if delegations is None:
@@ -643,6 +640,7 @@ class TargetsFile(MetaFile):
     self.info['expires'] = expires
     self.info['targets'] = filedict
     self.info['delegations'] = delegations
+    self.info['custom'] = custom
 
 
   @staticmethod
@@ -655,12 +653,13 @@ class TargetsFile(MetaFile):
     expires = targets_metadata['expires']
     filedict = targets_metadata.get('targets')
     delegations = targets_metadata.get('delegations')
+    custom = target_metadata.get('custom')
 
-    return TargetsFile(version, expires, filedict, delegations)
+    return TargetsFile(version, expires, filedict, delegations, custom)
 
 
   @staticmethod
-  def make_metadata(version, expiration_date, filedict=None, delegations=None):
+  def make_metadata(version, expiration_date, filedict=None, delegations=None, custom=None):
     if filedict is None and delegations is None:
       raise securesystemslib.exceptions.Error('We don\'t allow completely'
         ' empty targets metadata.')
@@ -675,6 +674,8 @@ class TargetsFile(MetaFile):
       result['targets'] = filedict
     if delegations is not None:
       result['delegations'] = delegations
+    if custom is not None:
+      result['custom'] = custom
 
     # Is 'result' a Targets metadata file?
     # Raise 'securesystemslib.exceptions.FormatError' if not.

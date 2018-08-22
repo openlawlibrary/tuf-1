@@ -1601,7 +1601,6 @@ class Targets(Metadata):
     expiration = tuf.formats.unix_timestamp_to_datetime(
         int(time.time() + TARGETS_EXPIRATION))
     expiration = expiration.isoformat() + 'Z'
-
     # If 'roleinfo' is not provided, set an initial default.
     if roleinfo is None:
       roleinfo = {'keyids': [], 'signing_keyids': [], 'threshold': 1,
@@ -1862,7 +1861,7 @@ class Targets(Metadata):
 
 
 
-  def add_target(self, filepath, custom=None):
+  def add_target(self, path, commit_hash):
     """
     <Purpose>
       Add a filepath (must be located in the repository's targets directory) to
@@ -1900,51 +1899,20 @@ class Targets(Metadata):
       None.
     """
 
-    # Does 'filepath' have the correct format?
-    # Ensure the arguments have the appropriate number of objects and object
-    # types, and that all dict keys are properly named.  Raise
-    # 'securesystemslib.exceptions.FormatError' if there is a mismatch.
-    securesystemslib.formats.PATH_SCHEMA.check_match(filepath)
-
-    if custom is None:
-      custom = {}
-
+    # Update the role's 'tuf.roledb.py' entry and avoid duplicates.
+    targets_directory_length = len(self._targets_directory)
+    roleinfo = tuf.roledb.get_roleinfo(self._rolename, self._repository_name)
+    
+      
+    if path not in roleinfo['paths']:
+      logger.debug('Adding new target: ' + repr(path))
+      roleinfo['paths'].update({path: commit_hash})
     else:
-      tuf.formats.CUSTOM_SCHEMA.check_match(custom)
+      logger.debug('Replacing target: ' + repr(path))
+      roleinfo['paths'].update({relative_path: commit_hash})
 
-    filepath = os.path.join(self._targets_directory, filepath)
-
-    # Add 'filepath' (i.e., relative to the targets directory) to the role's
-    # list of targets.  'filepath' will not be verified as an allowed path
-    # according to some delegating role.  Not verifying 'filepath' here allows
-    # freedom to add targets and parent restrictions in any order, minimize the
-    # number of times these checks are performed, and allow any role to
-    # delegate trust of packages to this Targes role.
-    if os.path.isfile(filepath):
-
-      # Update the role's 'tuf.roledb.py' entry and avoid duplicates.  Make
-      # sure to exclude the path separator when calculating the length of the
-      # targets directory.
-      targets_directory_length = len(self._targets_directory) + 1
-      roleinfo = tuf.roledb.get_roleinfo(self._rolename, self._repository_name)
-      relative_path = filepath[targets_directory_length:].replace('\\', '/')
-
-      if relative_path not in roleinfo['paths']:
-        logger.debug('Adding new target: ' + repr(relative_path))
-        roleinfo['paths'].update({relative_path: custom})
-
-      else:
-        logger.debug('Replacing target: ' + repr(relative_path))
-        roleinfo['paths'].update({relative_path: custom})
-
-
-      tuf.roledb.update_roleinfo(self._rolename, roleinfo,
-          repository_name=self._repository_name)
-
-    else:
-      raise securesystemslib.exceptions.Error(repr(filepath) + ' is not'
-          ' a valid file in the repository\'s targets'
-          ' directory: ' + repr(self._targets_directory))
+    tuf.roledb.update_roleinfo(self._rolename, roleinfo,
+        repository_name=self._repository_name)
 
 
 
