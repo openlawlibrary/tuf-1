@@ -227,17 +227,33 @@ ROLEDICT_SCHEMA = SCHEMA.DictOf(
 # An integer representing length.  Must be 0, or greater.
 LENGTH_SCHEMA = SCHEMA.Integer(lo=0)
 
+
+
 # A dict in {'sha256': '23432df87ab..', 'sha512': '34324abc34df..', ...} format.
 HASHDICT_SCHEMA = SCHEMA.DictOf(
   key_schema = SCHEMA.AnyString(),
   value_schema = HASH_SCHEMA)
 
+
+FILEINFO_FILES_SCHEMA =  SCHEMA.Object(
+  object_name = 'FILEINFO_FILES_SCHEMA',
+  length = LENGTH_SCHEMA,
+  hashes = HASHDICT_SCHEMA,
+  version = SCHEMA.Optional(METADATAVERSION_SCHEMA),
+  custom = SCHEMA.Optional(SCHEMA.Object()))
+
+
+FILEINFO_COMMIT_SCHEMA = SCHEMA.Object(
+  object_name = 'FILEINFO_COMMIT_SCHEMA',
+  commit = SCHEMA.AnyString())
+
 # Information about target files, like file length and file hash(es).  This
 # schema allows the storage of multiple hashes for the same file (e.g., sha256
 # and sha512 may be computed for the same file and stored).
 FILEINFO_SCHEMA = SCHEMA.Object(
-  object_name = 'FILEINFO_SCHEMA',
-  commit = SCHEMA.AnyString())
+  SCHEMA.OneOf([FILEINFO_FILES_SCHEMA, FILEINFO_COMMIT_SCHEMA]),
+  )
+
 
 # A dict holding the information for a particular target / file.  The dict keys
 # hold the relative file paths, and the dict values the corresponding file
@@ -653,7 +669,7 @@ class TargetsFile(MetaFile):
     expires = targets_metadata['expires']
     filedict = targets_metadata.get('targets')
     delegations = targets_metadata.get('delegations')
-    custom = target_metadata.get('custom')
+    custom = targets_metadata.get('custom')
 
     return TargetsFile(version, expires, filedict, delegations, custom)
 

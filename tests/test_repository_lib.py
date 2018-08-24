@@ -985,7 +985,6 @@ class TestRepositoryToolFunctions(unittest.TestCase):
 
   def test__load_top_level_metadata(self):
     repository_name = 'test_repository'
-
     temporary_directory = tempfile.mkdtemp(dir=self.temporary_directory)
     repository_directory = os.path.join(temporary_directory, 'repository')
     metadata_directory = os.path.join(repository_directory,

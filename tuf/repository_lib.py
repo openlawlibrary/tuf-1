@@ -98,7 +98,7 @@ SUPPORTED_KEY_TYPES = ['rsa', 'ed25519', 'ecdsa-sha2-nistp256']
 def _generate_and_write_metadata(rolename, metadata_filename,
   targets_directory, metadata_directory, consistent_snapshot=False,
   filenames=None, allow_partially_signed=False, increment_version_number=True,
-  repository_name='default'):
+  repository_name='default', using_files=True):
   """
   Non-public function that can generate and write the metadata for the
   specified 'rolename'.  It also increments the version number of 'rolename' if
@@ -153,7 +153,7 @@ def _generate_and_write_metadata(rolename, metadata_filename,
 
     metadata = generate_targets_metadata(targets_directory, roleinfo['paths'],
         roleinfo['version'], roleinfo['expires'], roleinfo['delegations'],
-        roleinfo.get('custom'), consistent_snapshot)
+        consistent_snapshot, roleinfo.get('custom'), using_files)
 
   # Before writing 'rolename' to disk, automatically increment its version
   # number (if 'increment_version_number' is True) so that the caller does not
@@ -1327,7 +1327,8 @@ def generate_root_metadata(version, expiration_date, consistent_snapshot,
 
 
 def generate_targets_metadata(targets_directory, target_files, version,
-    expiration_date, delegations=None, custom_info=None, write_consistent_targets=False):
+    expiration_date, delegations=None, write_consistent_targets=False,
+    custom_info=None, using_files=True):
   """
   <Purpose>
     Generate the targets metadata object. The targets in 'target_files' must
@@ -1382,7 +1383,6 @@ def generate_targets_metadata(targets_directory, target_files, version,
     A targets metadata object, conformant to
     'tuf.formats.TARGETS_SCHEMA'.
   """
-
   # Do the arguments have the correct format?
   # Ensure the arguments have the appropriate number of objects and object
   # types, and that all dict keys are properly named.
@@ -1392,7 +1392,6 @@ def generate_targets_metadata(targets_directory, target_files, version,
   tuf.formats.METADATAVERSION_SCHEMA.check_match(version)
   securesystemslib.formats.ISO8601_DATETIME_SCHEMA.check_match(expiration_date)
   securesystemslib.formats.BOOLEAN_SCHEMA.check_match(write_consistent_targets)
-
   if delegations is not None:
     tuf.formats.DELEGATIONS_SCHEMA.check_match(delegations)
 
@@ -1403,11 +1402,10 @@ def generate_targets_metadata(targets_directory, target_files, version,
 
   # Ensure the user is aware of a non-existent 'target_directory', and convert
   # it to its abosolute path, if it exists.
-  # we don't want this to be checked
-  # targets_directory = _check_directory(targets_directory)
+  if using_files:
+    targets_directory = _check_directory(targets_directory)
 
   # Generate the fileinfo of all the target files listed in 'target_files'.
-  # We don't need this a bunch of this
   for target, custom in six.iteritems(target_files):
 
     # The root-most folder of the targets directory should not be included in
@@ -1417,13 +1415,14 @@ def generate_targets_metadata(targets_directory, target_files, version,
 
     # Note: join() discards 'targets_directory' if 'target' contains a leading
     # path separator (i.e., is treated as an absolute path).
-    #target_path = os.path.join(targets_directory, target.lstrip(os.sep))
+    if using_files:
+      target_path = os.path.join(targets_directory, target.lstrip(os.sep))
 
-    # Ensure all target files listed in 'target_files' exist.  If just one of
-    # these files does not exist, raise an exception.
-    # if not os.path.exists(target_path):
-    #   raise securesystemslib.exceptions.Error(repr(target_path) + ' cannot'
-    #     ' be read.  Unable to generate targets metadata.')
+      # Ensure all target files listed in 'target_files' exist.  If just one of
+      # these files does not exist, raise an exception.
+      if not os.path.exists(target_path):
+        raise securesystemslib.exceptions.Error(repr(target_path) + ' cannot'
+         ' be read.  Unable to generate targets metadata.')
 
     # Add 'custom' if it has been provided.  Custom data about the target is
     # optional and will only be included in metadata (i.e., a 'custom' field in
@@ -1432,7 +1431,11 @@ def generate_targets_metadata(targets_directory, target_files, version,
     if len(custom):
       custom_data = custom
 
-    filedict[relative_targetpath] = custom_data
+    if using_files:
+      filedict[relative_targetpath.replace('\\', '/').lstrip('/')] = \
+        get_metadata_fileinfo(target_path, custom_data)
+    else:
+      filedict[relative_targetpath] = custom_data
 
     # Copy 'target_path' to 'digest_target' if consistent hashing is enabled.
     if write_consistent_targets:

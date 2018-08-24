@@ -185,7 +185,7 @@ class Repository(object):
 
 
 
-  def writeall(self, consistent_snapshot=False):
+  def writeall(self, consistent_snapshot=False, using_files=True):
     """
     <Purpose>
       Write all the JSON Metadata objects to their corresponding files.
@@ -245,7 +245,7 @@ class Repository(object):
       repo_lib._generate_and_write_metadata(dirty_rolename, dirty_filename,
           self._targets_directory, self._metadata_directory,
           consistent_snapshot, filenames,
-          repository_name=self._repository_name)
+          repository_name=self._repository_name, using_files=using_files)
 
     # Metadata should be written in (delegated targets -> root -> targets ->
     # snapshot -> timestamp) order.  Begin by generating the 'root.json'
@@ -258,27 +258,31 @@ class Repository(object):
       repo_lib._generate_and_write_metadata('root', filenames['root'],
           self._targets_directory, self._metadata_directory,
           consistent_snapshot, filenames,
-          repository_name=self._repository_name)
+          repository_name=self._repository_name,
+          using_files=using_files)
 
     # Generate the 'targets.json' metadata file.
     if 'targets' in dirty_rolenames:
       repo_lib._generate_and_write_metadata('targets', filenames['targets'],
           self._targets_directory, self._metadata_directory,
           consistent_snapshot,
-          repository_name=self._repository_name)
+          repository_name=self._repository_name,
+          using_files=using_files)
 
     # Generate the 'snapshot.json' metadata file.
     if 'snapshot' in dirty_rolenames:
       snapshot_signable, junk = repo_lib._generate_and_write_metadata('snapshot',
           filenames['snapshot'], self._targets_directory,
           self._metadata_directory, consistent_snapshot, filenames,
-          repository_name=self._repository_name)
+          repository_name=self._repository_name,
+          using_files=using_files)
 
     # Generate the 'timestamp.json' metadata file.
     if 'timestamp' in dirty_rolenames:
       repo_lib._generate_and_write_metadata('timestamp', filenames['timestamp'],
           self._targets_directory, self._metadata_directory, consistent_snapshot,
-          filenames, repository_name=self._repository_name)
+          filenames, repository_name=self._repository_name,
+          using_files=using_files)
 
     tuf.roledb.unmark_dirty(dirty_rolenames, self._repository_name)
 
@@ -1860,8 +1864,84 @@ class Targets(Metadata):
         repository_name=self._repository_name)
 
 
+  def add_target(self, filepath, custom=None):
+    """
+    <Purpose>
+      Add a filepath (must be located in the repository's targets directory) to
+      the Targets object.
+      This method does not actually create 'filepath' on the file system.
+      'filepath' must already exist on the file system.  If 'filepath'
+      has already been added, it will be replaced with any new file
+      or 'custom' information.
+      >>>
+      >>>
+      >>>
+    <Arguments>
+      filepath:
+        The path of the target file.  It must exist in the repository's targets
+        directory.
+      custom:
+        An optional object providing additional information about the file.
+    <Exceptions>
+      securesystemslib.exceptions.FormatError, if 'filepath' is improperly
+      formatted.
+      securesystemslib.exceptions.Error, if 'filepath' is not located in the
+      repository's targets directory.
+    <Side Effects>
+      Adds 'filepath' to this role's list of targets.  This role's
+      'tuf.roledb.py' entry is also updated.
+    <Returns>
+      None.
+    """
 
-  def add_target(self, path, commit_hash):
+    # Does 'filepath' have the correct format?
+    # Ensure the arguments have the appropriate number of objects and object
+    # types, and that all dict keys are properly named.  Raise
+    # 'securesystemslib.exceptions.FormatError' if there is a mismatch.
+    securesystemslib.formats.PATH_SCHEMA.check_match(filepath)
+
+    if custom is None:
+      custom = {}
+
+    else:
+      tuf.formats.CUSTOM_SCHEMA.check_match(custom)
+
+    filepath = os.path.join(self._targets_directory, filepath)
+
+    # Add 'filepath' (i.e., relative to the targets directory) to the role's
+    # list of targets.  'filepath' will not be verified as an allowed path
+    # according to some delegating role.  Not verifying 'filepath' here allows
+    # freedom to add targets and parent restrictions in any order, minimize the
+    # number of times these checks are performed, and allow any role to
+    # delegate trust of packages to this Targes role.
+    if os.path.isfile(filepath):
+
+      # Update the role's 'tuf.roledb.py' entry and avoid duplicates.  Make
+      # sure to exclude the path separator when calculating the length of the
+      # targets directory.
+      targets_directory_length = len(self._targets_directory) + 1
+      roleinfo = tuf.roledb.get_roleinfo(self._rolename, self._repository_name)
+      relative_path = filepath[targets_directory_length:].replace('\\', '/')
+
+      if relative_path not in roleinfo['paths']:
+        logger.debug('Adding new target: ' + repr(relative_path))
+        roleinfo['paths'].update({relative_path: custom})
+
+      else:
+        logger.debug('Replacing target: ' + repr(relative_path))
+        roleinfo['paths'].update({relative_path: custom})
+
+
+      tuf.roledb.update_roleinfo(self._rolename, roleinfo,
+          repository_name=self._repository_name)
+
+    else:
+      raise securesystemslib.exceptions.Error(repr(filepath) + ' is not'
+          ' a valid file in the repository\'s targets'
+          ' directory: ' + repr(self._targets_directory))
+
+
+  def add_target_commit(self, path, commit_hash):
     """
     <Purpose>
       Add a filepath (must be located in the repository's targets directory) to
