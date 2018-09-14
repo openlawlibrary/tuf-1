@@ -303,7 +303,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     # store the loaded metadata in the 'self.repository_updater.metadata'
     # store.
     self.assertEqual(len(self.repository_updater.metadata['current']), 4)
-    self.repository_updater._load_metadata_from_file('current', 'role1')
+    self.repository_updater._load_metadata('current', 'role1')
 
     # Verify that the correct number of metadata objects has been loaded
     # (i.e., only the 'root.json' file should have been loaded.
@@ -318,17 +318,17 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     with open(role1_filepath, 'ab') as file_object:
       file_object.write(b'bad JSON data')
 
-    self.repository_updater._load_metadata_from_file('current', 'role1')
+    self.repository_updater._load_metadata('current', 'role1')
     self.assertEqual(len(self.repository_updater.metadata['current']), 5)
 
     # Test if we fail gracefully if we can't deserialize a meta file
-    self.repository_updater._load_metadata_from_file('current', 'empty_file')
+    self.repository_updater._load_metadata('current', 'empty_file')
     self.assertFalse('empty_file' in self.repository_updater.metadata['current'])
 
     # Test invalid metadata set argument (must be either
     # 'current' or 'previous'.)
     self.assertRaises(securesystemslib.exceptions.Error,
-                      self.repository_updater._load_metadata_from_file,
+                      self.repository_updater._load_metadata,
                       'bad_metadata_set', 'role1')
 
 
@@ -603,7 +603,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     self.assertFalse(os.path.exists(previous_snapshot_filepath))
 
     # Verify that the current 'snapshot.json' is moved to the previous directory.
-    self.repository_updater._move_current_to_previous('snapshot')
+    self.repository_updater.metadata_handler._move_current_to_previous('snapshot')
     self.assertTrue(os.path.exists(previous_snapshot_filepath))
 
 
@@ -628,7 +628,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     # This test condition will verify that nothing is raised when a metadata
     # file has a future expiration date.
     root_metadata = self.repository_updater.metadata['current']['root']
-    self.repository_updater._ensure_not_expired(root_metadata, 'root')
+    self.repository_updater.metadata_handler._ensure_not_expired(root_metadata, 'root')
 
     # 'tuf.exceptions.ExpiredMetadataError' should be raised in this next test condition,
     # because the expiration_date has expired by 10 seconds.
@@ -640,7 +640,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     # the formats of the 'root.json' object.
     self.assertTrue(tuf.formats.ROOT_SCHEMA.matches(root_metadata))
     self.assertRaises(tuf.exceptions.ExpiredMetadataError,
-                      self.repository_updater._ensure_not_expired,
+                      self.repository_updater.metadata_handler._ensure_not_expired,
                       root_metadata, 'root')
 
 
@@ -733,7 +733,8 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
 
   def test_3__get_metadata_file(self):
-
+    # TODO create a git repository with invalid data so that we can check various errors
+    
     valid_tuf_version = tuf.formats.TUF_VERSION_NUMBER
     tuf.formats.TUF_VERSION_NUMBER = '2'
 
@@ -749,7 +750,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     upperbound_filelength = tuf.settings.DEFAULT_TIMESTAMP_REQUIRED_LENGTH
     try:
       self.repository_updater._get_metadata_file('timestamp', 'timestamp.json',
-      upperbound_filelength, 1)
+      1, upperbound_filelength)
 
     except tuf.exceptions.NoWorkingMirrorError as e:
       for mirror_error in six.itervalues(e.mirror_errors):
@@ -768,7 +769,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
     try:
       self.repository_updater._get_metadata_file('timestamp', 'timestamp.json',
-      upperbound_filelength, 1)
+       1, upperbound_filelength)
 
     except tuf.exceptions.NoWorkingMirrorError as e:
       for mirror_error in six.itervalues(e.mirror_errors):
@@ -777,7 +778,6 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     # Reset the TUF_VERSION_NUMBER so that subsequent unit tests use the
     # expected value.
     tuf.formats.TUF_VERSION_NUMBER = valid_tuf_version
-
 
 
 
@@ -1534,7 +1534,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     temp_file_object.write(b'X')
     temp_file_object.seek(0)
     self.assertRaises(tuf.exceptions.DownloadLengthMismatchError,
-                     self.repository_updater._hard_check_file_length,
+                     self.repository_updater.targets_handler._hard_check_file_length,
                      temp_file_object, 10)
 
 
@@ -1547,15 +1547,15 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     temp_file_object.write(b'XXX')
     temp_file_object.seek(0)
     self.assertRaises(tuf.exceptions.DownloadLengthMismatchError,
-                     self.repository_updater._soft_check_file_length,
+                     self.repository_updater.targets_handler._soft_check_file_length,
                      temp_file_object, 1)
 
     # Verify that an exception is not raised if the file length <= the observed
     # file length.
     temp_file_object.seek(0)
-    self.repository_updater._soft_check_file_length(temp_file_object, 3)
+    self.repository_updater.targets_handler._soft_check_file_length(temp_file_object, 3)
     temp_file_object.seek(0)
-    self.repository_updater._soft_check_file_length(temp_file_object, 4)
+    self.repository_updater.targets_handler._soft_check_file_length(temp_file_object, 4)
 
 
 
@@ -1671,7 +1671,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     metadata_file_object.seek(0)
 
     self.assertRaises(tuf.exceptions.InvalidMetadataJSONError,
-        self.repository_updater._verify_uncompressed_metadata_file,
+        self.repository_updater.metadata_handler._verify_uncompressed_metadata_file,
         metadata_file_object, 'root')
 
 
@@ -1690,7 +1690,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     next_invalid_root = securesystemslib.util.load_json_file(targets_path)
 
     self.assertRaises(securesystemslib.exceptions.BadSignatureError,
-        self.repository_updater._verify_root_chain_link, rolename, current_root,
+        self.repository_updater.metadata_handler._verify_root_chain_link, rolename, current_root,
         next_invalid_root)
 
 
@@ -1706,13 +1706,13 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
     def verify_target_file(targets_path):
       # Every target file must have its length and hashes inspected.
-      self.repository_updater._hard_check_file_length(targets_path, file_size)
-      self.repository_updater._check_hashes(targets_path, file_hashes)
+      self.repository_updater.targets_handler._hard_check_file_length(targets_path, file_size)
+      self.repository_updater.targets_handler._check_hashes(targets_path, file_hashes)
 
-    self.repository_updater._get_file('targets.json', verify_target_file,
+    self.repository_updater.targets_handler._get_file('targets.json', verify_target_file,
         file_type, file_size, download_safely=True)
 
-    self.repository_updater._get_file('targets.json', verify_target_file,
+    self.repository_updater.targets_handler._get_file('targets.json', verify_target_file,
         file_type, file_size, download_safely=False)
 
   def test_14__targets_of_role(self):
