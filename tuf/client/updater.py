@@ -139,6 +139,7 @@ import tuf.mirrors
 import tuf.roledb
 import tuf.sig
 import tuf.exceptions
+import tuf.client.handlers as handlers
 
 import securesystemslib.hash
 import securesystemslib.keys
@@ -629,7 +630,8 @@ class Updater(object):
     http://www.python.org/dev/peps/pep-0008/#method-names-and-instance-variables
   """
 
-  def __init__(self, repository_name, repository_mirrors):
+  def __init__(self, repository_name, repository_mirrors,
+    update_handler_cls=handlers.RemoteMetadataUpdater):
     """
     <Purpose>
       Constructor.  Instantiating an updater object causes all the metadata
@@ -696,6 +698,7 @@ class Updater(object):
 
     # Save the validated arguments.
     self.repository_name = repository_name
+    self.update_handler = update_handler_cls(repository_mirrors)
     self.mirrors = repository_mirrors
 
     # Store the trusted metadata read from disk.
@@ -1472,17 +1475,16 @@ class Updater(object):
       metadata.
     """
 
-    file_mirrors = tuf.mirrors.get_list_of_mirrors('meta', remote_filename,
-        self.mirrors)
+    file_locations = self.update_handler.get_file_locations(remote_filename)
 
     # file_mirror (URL): error (Exception)
     file_mirror_errors = {}
     file_object = None
 
-    for file_mirror in file_mirrors:
+    for file_mirror in file_locations:
       try:
-        file_object = tuf.download.unsafe_download(file_mirror,
-            upperbound_filelength)
+        file_object = self.update_handler.get_file(file_mirror=file_mirror,
+            upperbound_filelength=upperbound_filelength)
 
         # Verify 'file_object' according to the callable function.
         # 'file_object' is also verified if decompressed above (i.e., the
@@ -1549,15 +1551,14 @@ class Updater(object):
         file_object = None
 
       else:
+        self.update_handler.on_successful_update(file_mirror)
         break
 
     if file_object:
       return file_object
 
     else:
-      logger.error('Failed to update ' + repr(remote_filename) + ' from all'
-        ' mirrors: ' + repr(file_mirror_errors))
-      raise tuf.exceptions.NoWorkingMirrorError(file_mirror_errors)
+      self.update_handler.on_unsuccessful_update(remote_filename, file_mirror_errors)
 
 
 
