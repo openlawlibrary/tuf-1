@@ -344,43 +344,43 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     del self.repository_updater.metadata['current']['snapshot']
     #self.assertRaises(self.repository_updater._update_versioninfo('snapshot.json'))
     self.repository_updater._update_versioninfo('snapshot.json')
-    self.assertEqual(versioninfo_dict['snapshot.json']['version'], 11)
+    self.assertEqual(versioninfo_dict['snapshot.json']['version'], 9)
 
 
   def test_2__fileinfo_has_changed(self):
-      #  Verify that the method returns 'False' if file info was not changed.
-      root_filepath = os.path.join(self.client_metadata, 'root.json')
-      length, hashes = securesystemslib.util.get_file_details(root_filepath)
-      root_fileinfo = tuf.formats.make_fileinfo(length, hashes)
-      self.assertFalse(self.repository_updater._fileinfo_has_changed('root.json',
+    #  Verify that the method returns 'False' if file info was not changed.
+    root_filepath = os.path.join(self.client_metadata, 'root.json')
+    length, hashes = securesystemslib.util.get_file_details(root_filepath)
+    root_fileinfo = tuf.formats.make_fileinfo(length, hashes)
+    self.assertFalse(self.repository_updater._fileinfo_has_changed('root.json',
                                                              root_fileinfo))
 
-      # Verify that the method returns 'True' if length or hashes were changed.
-      new_length = 8
-      new_root_fileinfo = tuf.formats.make_fileinfo(new_length, hashes)
-      self.assertTrue(self.repository_updater._fileinfo_has_changed('root.json',
+    # Verify that the method returns 'True' if length or hashes were changed.
+    new_length = 8
+    new_root_fileinfo = tuf.formats.make_fileinfo(new_length, hashes)
+    self.assertTrue(self.repository_updater._fileinfo_has_changed('root.json',
                                                              new_root_fileinfo))
-      # Hashes were changed.
-      new_hashes = {'sha256': self.random_string()}
-      new_root_fileinfo = tuf.formats.make_fileinfo(length, new_hashes)
-      self.assertTrue(self.repository_updater._fileinfo_has_changed('root.json',
+    # Hashes were changed.
+    new_hashes = {'sha256': self.random_string()}
+    new_root_fileinfo = tuf.formats.make_fileinfo(length, new_hashes)
+    self.assertTrue(self.repository_updater._fileinfo_has_changed('root.json',
                                                              new_root_fileinfo))
 
-      # Verify that _fileinfo_has_changed() returns True if no fileinfo (or set
-      # to None) exists for some role.
-      self.assertTrue(self.repository_updater._fileinfo_has_changed('bad.json',
-          new_root_fileinfo))
+    # Verify that _fileinfo_has_changed() returns True if no fileinfo (or set
+    # to None) exists for some role.
+    self.assertTrue(self.repository_updater._fileinfo_has_changed('bad.json',
+        new_root_fileinfo))
 
-      saved_fileinfo = self.repository_updater.fileinfo['root.json']
-      self.repository_updater.fileinfo['root.json'] = None
-      self.assertTrue(self.repository_updater._fileinfo_has_changed('root.json',
-          new_root_fileinfo))
+    saved_fileinfo = self.repository_updater.fileinfo['root.json']
+    self.repository_updater.fileinfo['root.json'] = None
+    self.assertTrue(self.repository_updater._fileinfo_has_changed('root.json',
+        new_root_fileinfo))
 
 
-      self.repository_updater.fileinfo['root.json'] = saved_fileinfo
-      new_root_fileinfo['hashes']['sha666'] = '666'
-      self.repository_updater._fileinfo_has_changed('root.json',
-          new_root_fileinfo)
+    self.repository_updater.fileinfo['root.json'] = saved_fileinfo
+    new_root_fileinfo['hashes']['sha666'] = '666'
+    self.repository_updater._fileinfo_has_changed('root.json',
+        new_root_fileinfo)
 
 
 
@@ -535,6 +535,132 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     self.assertRaises(tuf.exceptions.ExpiredMetadataError,
                       self.repository_updater._ensure_not_expired,
                       root_metadata, 'root')
+
+
+  # def test_3__update_metadata(self):
+  #   # Setup
+  #   # _update_metadata() downloads, verifies, and installs the specified
+  #   # metadata role.  Remove knowledge of currently installed metadata and
+  #   # verify that they are re-installed after calling _update_metadata().
+
+  #   # This is the default metadata that we would create for the timestamp role,
+  #   # because it has no signed metadata for itself.
+  #   DEFAULT_TIMESTAMP_FILELENGTH = tuf.settings.DEFAULT_TIMESTAMP_REQUIRED_LENGTH
+
+  #   # This is the the upper bound length for Targets metadata.
+  #   DEFAULT_TARGETS_FILELENGTH = tuf.settings.DEFAULT_TARGETS_REQUIRED_LENGTH
+
+  #   # Save the versioninfo of 'targets.json,' needed later when re-installing
+  #   # with _update_metadata().
+  #   targets_versioninfo = \
+  #     self.repository_updater.metadata['current']['snapshot']['meta']\
+  #                                     ['targets.json']
+
+  #   # Remove the currently installed metadata from the store and disk.  Verify
+  #   # that the metadata dictionary is re-populated after calling
+  #   # _update_metadata().
+  #   del self.repository_updater.metadata['current']['timestamp']
+  #   del self.repository_updater.metadata['current']['targets']
+
+  #   timestamp_filepath = \
+  #     os.path.join(self.client_metadata_current, 'timestamp.json')
+  #   targets_filepath = os.path.join(self.client_metadata_current, 'targets.json')
+  #   root_filepath = os.path.join(self.client_metadata_current, 'root.json')
+  #   os.remove(timestamp_filepath)
+  #   os.remove(targets_filepath)
+
+  #   # Test: normal case.
+  #   # Verify 'timestamp.json' is properly installed.
+  #   self.assertFalse('timestamp' in self.repository_updater.metadata)
+
+  #   logger.info('\nroleinfo: ' + repr(tuf.roledb.get_rolenames(self.repository_name)))
+  #   self.repository_updater._update_metadata('timestamp',
+  #                                            DEFAULT_TIMESTAMP_FILELENGTH)
+  #   self.assertTrue('timestamp' in self.repository_updater.metadata['current'])
+  #   os.path.exists(timestamp_filepath)
+
+  #   # Verify 'targets.json' is properly installed.
+  #   self.assertFalse('targets' in self.repository_updater.metadata['current'])
+  #   self.repository_updater._update_metadata('targets',
+  #                               DEFAULT_TARGETS_FILELENGTH,
+  #                               targets_versioninfo['version'])
+  #   self.assertTrue('targets' in self.repository_updater.metadata['current'])
+
+  #   targets_signable = securesystemslib.util.load_json_file(targets_filepath)
+  #   loaded_targets_version = targets_signable['signed']['version']
+  #   self.assertEqual(targets_versioninfo['version'], loaded_targets_version)
+
+  #   # Test: Invalid / untrusted version numbers.
+  #   # Invalid version number for 'targets.json'.
+  #   self.assertRaises(tuf.exceptions.NoWorkingMirrorError,
+  #       self.repository_updater._update_metadata,
+  #       'targets', DEFAULT_TARGETS_FILELENGTH, 88)
+
+  #   # Verify that the specific exception raised is correct for the previous
+  #   # case.
+  #   try:
+  #     self.repository_updater._update_metadata('targets',
+  #                                              DEFAULT_TARGETS_FILELENGTH, 88)
+
+  #   except tuf.exceptions.NoWorkingMirrorError as e:
+  #     for mirror_error in six.itervalues(e.mirror_errors):
+  #       assert isinstance(mirror_error, securesystemslib.exceptions.BadVersionNumberError)
+
+  #   # Verify that the specific exception raised is correct for the previous
+  #   # case.  The version number is checked, so the specific error in
+  #   # this case should be 'securesystemslib.exceptions.BadVersionNumberError'.
+  #   try:
+  #     self.repository_updater._update_metadata('targets',
+  #                                              DEFAULT_TARGETS_FILELENGTH,
+  #                                              88)
+
+  #   except tuf.exceptions.NoWorkingMirrorError as e:
+  #     for mirror_error in six.itervalues(e.mirror_errors):
+  #       assert isinstance(mirror_error, securesystemslib.exceptions.BadVersionNumberError)
+
+
+  # def test_3__get_metadata_file(self):
+  #   # we need a way of testing if validation works
+  #   # in our case that is not that easy since we clone a bare
+  #   # git repository and can't just commit to it
+  #   # so in order to test invalid metadata, we need to create a different
+  #   # repository and commit to it...
+  #   metadata_handler = self.repository_updater.update_handler
+  #   validation_auth_repo = metadata_handler.validation_auth_repo
+
+  #   metadata_handler.validation_auth_repo = self.test_validation_repo
+
+  #   valid_tuf_version = tuf.formats.TUF_VERSION_NUMBER
+  #   tuf.formats.TUF_VERSION_NUMBER = '2'
+
+  #   repository = repo_tool.load_repository(self.test_validation_repo.repo_path, metadata_dir_name='metadata')
+  #   repository.timestamp.load_signing_key(self.role_keys['timestamp']['private'])
+  #   repository.writeall()
+  #   self.test_validation_repo.commit('New metadata')
+
+  #   metadata_handler._init_commits()
+  #   self.assertRaises(securesystemslib.exceptions.BadVersionNumberError, self.repository_updater.
+  #                     _get_metadata_file_content, 'timestamp', 'timestamp.json', 0, None)
+
+  #   # Test for an improperly formatted TUF version number.
+  #   self.test_validation_repo.reset_hard()
+  #   tuf.formats.TUF_VERSION_NUMBER = 'BAD'
+  #   repository = repo_tool.load_repository(self.test_validation_repo.repo_path, repository_name = 'test2',
+  #                                          metadata_dir_name='metadata')
+  #   repository.timestamp.load_signing_key(self.role_keys['timestamp']['private'])
+  #   repository.writeall()
+  #   self.test_validation_repo.commit('New metadata')
+  #   metadata_handler._init_commits()
+
+  #   self.assertRaises(securesystemslib.exceptions.FormatError, self.repository_updater.
+  #                     _get_metadata_file_content, 'timestamp', 'timestamp.json', 0, None)
+
+  #   # Reset the TUF_VERSION_NUMBER so that subsequent unit tests use the
+  #   # expected value. Also revert changes made to the metadata handler and the test validationn repo
+  #   metadata_handler.validation_auth_repo = validation_auth_repo
+  #   self.test_validation_repo.reset_hard()
+  #   tuf.formats.TUF_VERSION_NUMBER = valid_tuf_version
+
 
 def _load_role_keys(keystore_directory):
 

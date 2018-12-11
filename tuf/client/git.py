@@ -47,7 +47,7 @@ class GitRepo(object):
   def all_commits_since_commit(self, since_commit):
     commits = self._git(f'rev-list {since_commit}..HEAD').strip()
     if not commits:
-      return commits
+      return []
     commits = commits.split('\n')
     commits.reverse()
     return commits

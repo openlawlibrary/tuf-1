@@ -699,7 +699,6 @@ class Updater(object):
 
     # Save the validated arguments.
     self.repository_name = repository_name
-    self.update_handler = update_handler_cls(repository_mirrors)
     self.mirrors = repository_mirrors
 
     # Store the trusted metadata read from disk.
@@ -743,6 +742,7 @@ class Updater(object):
     # Set the path for the current set of metadata files.
     repositories_directory = tuf.settings.repositories_directory
     repository_directory = os.path.join(repositories_directory, self.repository_name)
+    self.update_handler = update_handler_cls(repository_mirrors, repository_directory)
     current_path = os.path.join(repository_directory, 'metadata', 'current')
 
     # Ensure the current path is valid/exists before saving it.
@@ -1303,7 +1303,7 @@ class Updater(object):
     for file_mirror in file_locations:
       try:
         file_object = self.update_handler.get_file(file_mirror=file_mirror,
-            upperbound_filelength=upperbound_filelength)
+            filename=remote_filename, upperbound_filelength=upperbound_filelength)
 
         # Verify 'file_object' according to the callable function.
         # 'file_object' is also verified if decompressed above (i.e., the
@@ -1370,7 +1370,7 @@ class Updater(object):
         file_object = None
 
       else:
-        self.update_handler.on_successful_update(file_mirror)
+        self.update_handler.on_successful_update(remote_filename, file_mirror)
         break
 
     if file_object:

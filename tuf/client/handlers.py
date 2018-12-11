@@ -15,8 +15,9 @@ logger = logging.getLogger('tuf.client.handlers')
 
 class MetadataUpdater(object):
 
-  def __init__(self, mirrors):
+  def __init__(self, mirrors, repository_directory):
     self.mirrors = mirrors
+    self.repository_directory = repository_directory
 
 class RemoteMetadataUpdater(MetadataUpdater):
 
@@ -31,7 +32,7 @@ class RemoteMetadataUpdater(MetadataUpdater):
     return tuf.download.unsafe_download(file_mirror,
         upperbound_filelength)
 
-  def on_successful_update(self, location):
+  def on_successful_update(self, filename, location):
     pass
 
   def on_unsuccessful_update(self, filename, errors):
@@ -43,16 +44,22 @@ class RemoteMetadataUpdater(MetadataUpdater):
 class GitMetadataUpdater(MetadataUpdater):
 
 
-  def __init__(self, mirrors):
-    super(GitMetadataUpdater, self).__init__(mirrors)
-    # repository
+  def __init__(self, mirrors, repository_directory):
+    super(GitMetadataUpdater, self).__init__(mirrors, repository_directory)
     # validation_auth_repo is a freshly cloned
     # bare repository. It is cloned to a temporary
     # directory that should be removed once the update
     # is completed
     auth_url = mirrors['mirror1']['url_prefix']
     self._clone_validation_repo(auth_url)
-
+    # users_auth_repo is the authentication repository
+    # located on the users machine which needs to be
+    # updated
+    self.repository_directory = repository_directory
+    self.users_auth_repo = tuf.client.git.GitRepo(repository_directory)
+    self.users_auth_repo.is_git_repository()
+    self.users_auth_repo.checkout_branch('master')
+    self._init_commits()
 
 
   def _clone_validation_repo(self, url):
@@ -60,6 +67,46 @@ class GitMetadataUpdater(MetadataUpdater):
     self.validation_auth_repo = tuf.client.git.BareGitRepo(temp_dir)
     self.validation_auth_repo.clone(url)
     self.validation_auth_repo.fetch(fetch_all=True)
+
+
+  def _init_commits(self):
+    users_head_sha = self.users_auth_repo.head_commit_sha()
+    # find all commits after the top commit of the
+    # client's local authentication repository
+    self.commits = self.validation_auth_repo.all_commits_since_commit(users_head_sha)
+    # insert the current one at the beginning of the list
+    self.commits.insert(0, users_head_sha)
+
+    # assuming that the user's directory exists for now
+    self.commits_indexes = {}
+
+    for file_name in self.users_auth_repo.list_files_at_revision(users_head_sha):
+      self.commits_indexes[file_name] = 0
+
+
+  def get_file_locations(self, remote_filename):
+    commit = self.commits_indexes.get(remote_filename, -1)
+    return self.commits[commit+1::]
+
+  def get_file(self, **kwargs):
+    commit = kwargs['file_mirror']
+    filename = kwargs['filename']
+    metadata = self.validation_auth_repo.show_file_at_revision(
+        commit, f'metadata/{filename}')
+
+    temp_file_object = securesystemslib.util.TempFile()
+    temp_file_object.write(metadata.encode())
+
+    return temp_file_object
+
+
+  def on_successful_update(self, filename, location):
+    self.commits_indexes[filename] = self.commits.index(location)
+
+  def on_unsuccessful_update(self, filename, errors):
+    logger.error('Failed to update ' + repr(filename) + ' from'
+        ' all mirrors: ' + repr(errors))
+    raise tuf.exceptions.NoWorkingMirrorError(errors)
 
 
 class TargetsHandler(object):
