@@ -4,6 +4,7 @@ import securesystemslib
 import logging
 import tuf.exceptions
 import six
+import errno
 
 
 
@@ -39,9 +40,10 @@ class RemoteMetadataUpdater(MetadataUpdater):
 
 class TargetsHandler(object):
 
-  def __init__(self, mirrors, consistent_snapshot):
+  def __init__(self, mirrors, consistent_snapshot, repository_name):
     self.mirrors = mirrors
     self.consistent_snapshot = consistent_snapshot
+    self.repository_name = repository_name
 
 
 class FileTargetsHandler(TargetsHandler):
@@ -318,3 +320,146 @@ class FileTargetsHandler(TargetsHandler):
       else:
         logger.info('The file\'s ' + algorithm + ' hash is'
             ' correct: ' + trusted_hash)
+
+
+  def remove_obsolete_targets(self, destination_directory, metadata):
+    """
+    <Purpose>
+      Remove any files that are in 'previous' but not 'current'.  This makes it
+      so if you remove a file from a repository, it actually goes away.  The
+      targets for the 'targets' role and all delegated roles are checked.
+
+    <Arguments>
+      destination_directory:
+        The directory containing the target files tracked by TUF.
+
+    <Exceptions>
+      securesystemslib.exceptions.FormatError:
+        If 'destination_directory' is improperly formatted.
+
+      tuf.exceptions.RepositoryError:
+        If an error occurred removing any files.
+
+    <Side Effects>
+      Target files are removed from disk.
+
+    <Returns>
+      None.
+    """
+
+    # Does 'destination_directory' have the correct format?
+    # Raise 'securesystemslib.exceptions.FormatError' if there is a mismatch.
+    securesystemslib.formats.PATH_SCHEMA.check_match(destination_directory)
+
+    # Iterate the rolenames and verify whether the 'previous' directory
+    # contains a target no longer found in 'current'.
+    for role in tuf.roledb.get_rolenames(self.repository_name):
+      if role.startswith('targets'):
+        if role in metadata['previous'] and metadata['previous'][role] != None:
+          for target in metadata['previous'][role]['targets']:
+            if target not in metadata['current'][role]['targets']:
+              # 'target' is only in 'previous', so remove it.
+              logger.warning('Removing obsolete file: ' + repr(target) + '.')
+
+              # Remove the file if it hasn't been removed already.
+              destination = \
+                os.path.join(destination_directory, target.lstrip(os.sep))
+              try:
+                os.remove(destination)
+
+              except OSError as e:
+                # If 'filename' already removed, just log it.
+                if e.errno == errno.ENOENT:
+                  logger.info('File ' + repr(destination) + ' was already'
+                    ' removed.')
+
+                else:
+                  logger.error(str(e))
+
+            else:
+              logger.debug('Skipping: ' + repr(target) + '.  It is still'
+                ' a current target.')
+        else:
+          logger.debug('Skipping: ' + repr(role) + '.  Not in the previous'
+            ' metadata')
+
+
+
+  def download_target(self, target, destination_directory):
+    """
+    <Purpose>
+      Download 'target' and verify it is trusted.
+
+      This will only store the file at 'destination_directory' if the
+      downloaded file matches the description of the file in the trusted
+      metadata.
+
+    <Arguments>
+      target:
+        The target to be downloaded.  Conformant to
+        'tuf.formats.TARGETINFO_SCHEMA'.
+
+      destination_directory:
+        The directory to save the downloaded target file.
+
+    <Exceptions>
+      securesystemslib.exceptions.FormatError:
+        If 'target' is not properly formatted.
+
+      tuf.exceptions.NoWorkingMirrorError:
+        If a target could not be downloaded from any of the mirrors.
+
+        Although expected to be rare, there might be OSError exceptions (except
+        errno.EEXIST) raised when creating the destination directory (if it
+        doesn't exist).
+
+    <Side Effects>
+      A target file is saved to the local system.
+
+    <Returns>
+      None.
+    """
+
+    # Do the arguments have the correct format?
+    # This check ensures the arguments have the appropriate
+    # number of objects and object types, and that all dict
+    # keys are properly named.
+    # Raise 'securesystemslib.exceptions.FormatError' if the check fail.
+    tuf.formats.TARGETINFO_SCHEMA.check_match(target)
+    securesystemslib.formats.PATH_SCHEMA.check_match(destination_directory)
+
+    # Extract the target file information.
+    target_filepath = target['filepath']
+    trusted_length = target['fileinfo']['length']
+    trusted_hashes = target['fileinfo']['hashes']
+
+    # '_get_target_file()' checks every mirror and returns the first target
+    # that passes verification.
+    target_file_object = self._get_target_file(target_filepath, trusted_length,
+        trusted_hashes)
+
+    # We acquired a target file object from a mirror.  Move the file into place
+    # (i.e., locally to 'destination_directory').  Note: join() discards
+    # 'destination_directory' if 'target_path' contains a leading path
+    # separator (i.e., is treated as an absolute path).
+    destination = os.path.join(destination_directory,
+        target_filepath.lstrip(os.sep))
+    destination = os.path.abspath(destination)
+    target_dirpath = os.path.dirname(destination)
+
+    # When attempting to create the leaf directory of 'target_dirpath', ignore
+    # any exceptions raised if the root directory already exists.  All other
+    # exceptions potentially thrown by os.makedirs() are re-raised.
+    # Note: os.makedirs can raise OSError if the leaf directory already exists
+    # or cannot be created.
+    try:
+      os.makedirs(target_dirpath)
+
+    except OSError as e:
+      if e.errno == errno.EEXIST:
+        pass
+
+      else:
+        raise
+
+    target_file_object.move(destination)
