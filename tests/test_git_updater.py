@@ -169,15 +169,20 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
                                               GitMetadataUpdater,
                                               RepositoryTargetsHandler)
 
+    self.client_metadata_current = os.path.join(self.client_metadata,
+        'current')
+    self.client_metadata_previous = os.path.join(self.client_metadata,
+        'previous')
+
     # Metadata role keys are needed by the test cases to make changes to the
     # repository (e.g., adding a new target file to 'targets.json' and then
     # requesting a refresh()).
-    # self.role_keys = _load_role_keys(self.client_keystore)
 
-    # parent = Path(self.client_repository).parent
-    # test_repo_dir = os.path.join(parent, 'test_repository2')
-    # shutil.copytree(self.client_repository, test_repo_dir)
-    # self.test_validation_repo = GitRepo(test_repo_dir)
+    self.role_keys = _load_role_keys(self.client_keystore)
+    parent = Path(self.client_repository).parent
+    test_repo_dir = os.path.join(parent, 'test_repository2')
+    shutil.copytree(self.client_repository, test_repo_dir)
+    self.test_validation_repo = GitRepo(test_repo_dir)
 
   def tearDown(self):
     # We are inheriting from custom class.
@@ -212,3 +217,390 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
     # Test: Normal 'tuf.client.updater.Updater' instantiation.
     updater.Updater('test_repository1', self.repository_mirrors, GitMetadataUpdater)
+    # Metadata role keys are needed by the test cases to make changes to the
+    # repository (e.g., adding a new target file to 'targets.json' and then
+    # requesting a refresh()).
+    self.role_keys = _load_role_keys(self.client_keystore)
+
+
+  def test_1__load_metadata_from_file(self):
+
+    # Setup
+    # Get the 'preview.json' filepath.  Manually load the role metadata, and
+    # compare it against the loaded metadata by '_load_metadata_from_file()'.
+    root_filepath = \
+      os.path.join(self.client_metadata, 'root.json')
+    root_meta = securesystemslib.util.load_json_file(root_filepath)
+
+    # Load the 'role1.json' file with _load_metadata_from_file, which should
+    # store the loaded metadata in the 'self.repository_updater.metadata'
+    # store.
+    self.assertEqual(len(self.repository_updater.metadata['current']), 4)
+    self.repository_updater._load_metadata_from_file('current', 'root')
+
+    # Verify that the correct number of metadata objects has been loaded
+    # (i.e., only the 'root.json' file should have been loaded.
+    self.assertEqual(len(self.repository_updater.metadata['current']), 4)
+
+    # Verify that the content of root metadata is valid.
+    self.assertEqual(self.repository_updater.metadata['current']['root'],
+                     root_meta['signed'])
+
+    # Verify that _load_metadata_from_file() doesn't raise an exception for
+    # improperly formatted metadata, and doesn't load the bad file.
+    with open(root_filepath, 'ab') as file_object:
+      file_object.write(b'bad JSON data')
+
+    self.repository_updater._load_metadata_from_file('current', 'preview')
+    self.assertEqual(len(self.repository_updater.metadata['current']), 5)
+
+    # Test if we fail gracefully if we can't deserialize a meta file
+    self.repository_updater._load_metadata_from_file('current', 'empty_file')
+    self.assertFalse('empty_file' in self.repository_updater.metadata['current'])
+
+    # Test invalid metadata set argument (must be either
+    # 'current' or 'previous'.)
+    self.assertRaises(securesystemslib.exceptions.Error,
+                      self.repository_updater._load_metadata_from_file,
+                      'bad_metadata_set', 'preview')
+
+  def test_1__rebuild_key_and_role_db(self):
+    # Setup
+    root_roleinfo = tuf.roledb.get_roleinfo('root', self.repository_name)
+    root_metadata = self.repository_updater.metadata['current']['root']
+    root_threshold = root_metadata['roles']['root']['threshold']
+    number_of_root_keys = len(root_metadata['keys'])
+
+    self.assertEqual(root_roleinfo['threshold'], root_threshold)
+
+    # Ensure we add 2 to the number of root keys (actually, the number of root
+    # keys multiplied by the number of keyid hash algorithms), to include the
+    # delegated targets key (+1 for its sha512 keyid).  The delegated roles of
+    # 'targets.json' are also loaded when the repository object is
+    # instantiated.
+
+    self.assertEqual(number_of_root_keys * 2 + 4, len(tuf.keydb._keydb_dict[self.repository_name]))
+
+    # Test: normal case.
+    self.repository_updater._rebuild_key_and_role_db()
+
+    root_roleinfo = tuf.roledb.get_roleinfo('root', self.repository_name)
+    self.assertEqual(root_roleinfo['threshold'], root_threshold)
+
+    # _rebuild_key_and_role_db() will only rebuild the keys and roles specified
+    # in the 'root.json' file, unlike __init__().  Instantiating an updater
+    # object calls both _rebuild_key_and_role_db() and _import_delegations().
+    self.assertEqual(number_of_root_keys * 2, len(tuf.keydb._keydb_dict[self.repository_name]))
+
+    # Test: properly updated roledb and keydb dicts if the Root role changes.
+    root_metadata = self.repository_updater.metadata['current']['root']
+    root_metadata['roles']['root']['threshold'] = 8
+    root_metadata['keys'].popitem()
+
+    self.repository_updater._rebuild_key_and_role_db()
+
+    root_roleinfo = tuf.roledb.get_roleinfo('root', self.repository_name)
+    self.assertEqual(root_roleinfo['threshold'], 8)
+    self.assertEqual(number_of_root_keys * 2 - 2, len(tuf.keydb._keydb_dict[self.repository_name]))
+
+
+  def test_1__update_versioninfo(self):
+    # Tests
+    # Verify that the 'self.versioninfo' dictionary is empty (it starts off
+    # empty and is only populated if _update_versioninfo() is called.
+    versioninfo_dict = self.repository_updater.versioninfo
+    self.assertEqual(len(versioninfo_dict), 0)
+    # Load the versioninfo of the top-level Targets role.  This action
+    # populates the 'self.versioninfo' dictionary.
+    self.repository_updater._update_versioninfo('targets.json')
+    self.assertEqual(len(versioninfo_dict), 1)
+    self.assertTrue(tuf.formats.FILEINFODICT_SCHEMA.matches(versioninfo_dict))
+
+    # The Snapshot role stores the version numbers of all the roles available
+    # on the repository.  Load Snapshot to extract Root's version number
+    # and compare it against the one loaded by 'self.repository_updater'.
+    snapshot_filepath = os.path.join(self.client_metadata, 'snapshot.json')
+    snapshot_signable = securesystemslib.util.load_json_file(snapshot_filepath)
+    targets_versioninfo = snapshot_signable['signed']['meta']['targets.json']
+
+    # Verify that the manually loaded version number of root.json matches
+    # the one loaded by the updater object.
+    self.assertTrue('targets.json' in versioninfo_dict)
+    self.assertEqual(versioninfo_dict['targets.json'], targets_versioninfo)
+
+    # Verify that 'self.versioninfo' is incremented if another role is updated.
+    self.repository_updater._update_versioninfo('preview.json')
+    self.assertEqual(len(versioninfo_dict), 2)
+
+    # Verify that 'self.versioninfo' is incremented if a non-existent role is
+    # requested, and has its versioninfo entry set to 'None'.
+
+    self.repository_updater._update_versioninfo('bad_role.json')
+    self.assertEqual(len(versioninfo_dict), 3)
+    self.assertEqual(versioninfo_dict['bad_role.json'], None)
+
+    # Verify that the versioninfo specified in Timestamp is used if the Snapshot
+    # role hasn't been downloaded yet.
+    del self.repository_updater.metadata['current']['snapshot']
+    #self.assertRaises(self.repository_updater._update_versioninfo('snapshot.json'))
+    self.repository_updater._update_versioninfo('snapshot.json')
+    self.assertEqual(versioninfo_dict['snapshot.json']['version'], 11)
+
+
+  def test_2__fileinfo_has_changed(self):
+      #  Verify that the method returns 'False' if file info was not changed.
+      root_filepath = os.path.join(self.client_metadata, 'root.json')
+      length, hashes = securesystemslib.util.get_file_details(root_filepath)
+      root_fileinfo = tuf.formats.make_fileinfo(length, hashes)
+      self.assertFalse(self.repository_updater._fileinfo_has_changed('root.json',
+                                                             root_fileinfo))
+
+      # Verify that the method returns 'True' if length or hashes were changed.
+      new_length = 8
+      new_root_fileinfo = tuf.formats.make_fileinfo(new_length, hashes)
+      self.assertTrue(self.repository_updater._fileinfo_has_changed('root.json',
+                                                             new_root_fileinfo))
+      # Hashes were changed.
+      new_hashes = {'sha256': self.random_string()}
+      new_root_fileinfo = tuf.formats.make_fileinfo(length, new_hashes)
+      self.assertTrue(self.repository_updater._fileinfo_has_changed('root.json',
+                                                             new_root_fileinfo))
+
+      # Verify that _fileinfo_has_changed() returns True if no fileinfo (or set
+      # to None) exists for some role.
+      self.assertTrue(self.repository_updater._fileinfo_has_changed('bad.json',
+          new_root_fileinfo))
+
+      saved_fileinfo = self.repository_updater.fileinfo['root.json']
+      self.repository_updater.fileinfo['root.json'] = None
+      self.assertTrue(self.repository_updater._fileinfo_has_changed('root.json',
+          new_root_fileinfo))
+
+
+      self.repository_updater.fileinfo['root.json'] = saved_fileinfo
+      new_root_fileinfo['hashes']['sha666'] = '666'
+      self.repository_updater._fileinfo_has_changed('root.json',
+          new_root_fileinfo)
+
+
+
+  def test_2__import_delegations(self):
+    # Setup.
+    # In order to test '_import_delegations' the parent of the delegation
+    # has to be in Repository.metadata['current'], but it has to be inserted
+    # there without using '_load_metadata_from_file()' since it calls
+    # '_import_delegations()'.
+
+    repository_name = self.repository_updater.repository_name
+    tuf.keydb.clear_keydb(repository_name)
+    tuf.roledb.clear_roledb(repository_name)
+
+    self.assertEqual(len(tuf.roledb._roledb_dict[repository_name]), 0)
+    self.assertEqual(len(tuf.keydb._keydb_dict[repository_name]), 0)
+
+    self.repository_updater._rebuild_key_and_role_db()
+
+    self.assertEqual(len(tuf.roledb._roledb_dict[repository_name]), 4)
+
+    # Take into account the number of keyids algorithms supported by default,
+    # which this test condition expects to be two (sha256 and sha512).
+    self.assertEqual(6 * 2, len(tuf.keydb._keydb_dict[repository_name]))
+
+    # Test: pass a role without delegations.
+    self.repository_updater._import_delegations('root')
+
+    # Verify that there was no change to the roledb and keydb dictionaries by
+    # checking the number of elements in the dictionaries.
+    self.assertEqual(len(tuf.roledb._roledb_dict[repository_name]), 4)
+    # Take into account the number of keyid hash algorithms, which this
+    # test condition expects to be two (for sha256 and sha512).
+    self.assertEqual(len(tuf.keydb._keydb_dict[repository_name]), 6 * 2)
+
+    # Test: normal case, first level delegation.
+    self.repository_updater._import_delegations('targets')
+
+    self.assertEqual(len(tuf.roledb._roledb_dict[repository_name]), 6)
+    # The number of root keys (times the number of key hash algorithms) +
+    # delegation's key (+1 for its sha512 keyid).
+    self.assertEqual(len(tuf.keydb._keydb_dict[repository_name]), 7 * 2 + 2)
+    # Verify that roledb dictionary was added.
+    self.assertTrue('preview' in tuf.roledb._roledb_dict[repository_name])
+    self.assertTrue('production' in tuf.roledb._roledb_dict[repository_name])
+
+    # Verify that keydb dictionary was updated.
+    preview_signable = \
+      securesystemslib.util.load_json_file(os.path.join(self.client_metadata,
+                                           'preview.json'))
+    keyids = []
+    for signature in preview_signable['signatures']:
+      keyids.append(signature['keyid'])
+
+    for keyid in keyids:
+      self.assertTrue(keyid in tuf.keydb._keydb_dict[repository_name])
+
+    # Verify that _import_delegations() ignores invalid keytypes in the 'keys'
+    # field of parent role's 'delegations'.
+    existing_keyid = keyids[0]
+
+    self.repository_updater.metadata['current']['targets']\
+      ['delegations']['keys'][existing_keyid]['keytype'] = 'bad_keytype'
+    self.repository_updater._import_delegations('targets')
+
+    # Restore the keytype of 'existing_keyid'.
+    self.repository_updater.metadata['current']['targets']\
+      ['delegations']['keys'][existing_keyid]['keytype'] = 'ed25519'
+
+    # Verify that _import_delegations() raises an exception if one of the
+    # delegated keys is malformed.
+    valid_keyval = self.repository_updater.metadata['current']['targets']\
+      ['delegations']['keys'][existing_keyid]['keyval']
+
+    self.repository_updater.metadata['current']['targets']\
+      ['delegations']['keys'][existing_keyid]['keyval'] = 1
+    self.assertRaises(securesystemslib.exceptions.FormatError, self.repository_updater._import_delegations, 'targets')
+
+    self.repository_updater.metadata['current']['targets']\
+      ['delegations']['keys'][existing_keyid]['keyval'] = valid_keyval
+
+    # Verify that _import_delegations() raises an exception if one of the
+    # delegated roles is malformed.
+    self.repository_updater.metadata['current']['targets']\
+      ['delegations']['roles'][0]['name'] = 1
+    self.assertRaises(securesystemslib.exceptions.FormatError, self.repository_updater._import_delegations, 'targets')
+
+
+
+  def test_2__versioninfo_has_been_updated(self):
+    # Verify that the method returns 'False' if a versioninfo was not changed.
+    snapshot_filepath = os.path.join(self.client_metadata, 'snapshot.json')
+    snapshot_signable = securesystemslib.util.load_json_file(snapshot_filepath)
+    targets_versioninfo = snapshot_signable['signed']['meta']['targets.json']
+
+    self.assertFalse(self.repository_updater._versioninfo_has_been_updated('targets.json',
+                                                           targets_versioninfo))
+
+    # Verify that the method returns 'True' if Root's version number changes.
+    targets_versioninfo['version'] = 8
+    self.assertTrue(self.repository_updater._versioninfo_has_been_updated('targets.json',
+                                                           targets_versioninfo))
+
+
+
+
+  def test_2__move_current_to_previous(self):
+    # Test case will consist of removing a metadata file from client's
+    # '{client_repository}/metadata/previous' directory, executing the method
+    # and then verifying that the 'previous' directory contains the snapshot
+    # file.
+    previous_snapshot_filepath = os.path.join(self.client_metadata_previous,
+                                              'snapshot.json')
+    os.remove(previous_snapshot_filepath)
+    self.assertFalse(os.path.exists(previous_snapshot_filepath))
+
+    # Verify that the current 'snapshot.json' is moved to the previous directory.
+    self.repository_updater._move_current_to_previous('snapshot')
+    self.assertTrue(os.path.exists(previous_snapshot_filepath))
+
+
+
+
+  def test_2__delete_metadata(self):
+    # This test will verify that 'root' metadata is never deleted.  When a role
+    # is deleted verify that the file is not present in the
+    # 'self.repository_updater.metadata' dictionary.
+    self.repository_updater._delete_metadata('root')
+    self.assertTrue('root' in self.repository_updater.metadata['current'])
+
+    self.repository_updater._delete_metadata('timestamp')
+    self.assertFalse('timestamp' in self.repository_updater.metadata['current'])
+
+
+
+
+  def test_2__ensure_not_expired(self):
+    # This test condition will verify that nothing is raised when a metadata
+    # file has a future expiration date.
+    root_metadata = self.repository_updater.metadata['current']['root']
+    self.repository_updater._ensure_not_expired(root_metadata, 'root')
+
+    # 'tuf.exceptions.ExpiredMetadataError' should be raised in this next test condition,
+    # because the expiration_date has expired by 10 seconds.
+    expires = tuf.formats.unix_timestamp_to_datetime(int(time.time() - 10))
+    expires = expires.isoformat() + 'Z'
+    root_metadata['expires'] = expires
+
+    # Ensure the 'expires' value of the root file is valid by checking the
+    # the formats of the 'root.json' object.
+    self.assertTrue(tuf.formats.ROOT_SCHEMA.matches(root_metadata))
+    self.assertRaises(tuf.exceptions.ExpiredMetadataError,
+                      self.repository_updater._ensure_not_expired,
+                      root_metadata, 'root')
+
+def _load_role_keys(keystore_directory):
+
+  # Populating 'self.role_keys' by importing the required public and private
+  # keys of 'tuf/tests/repository_data/'.  The role keys are needed when
+  # modifying the remote repository used by the test cases in this unit test.
+
+  # The pre-generated key files in 'repository_data/keystore' are all encrypted with
+  # a 'password' passphrase.
+
+  # Store and return the cryptography keys of the top-level roles, including 1
+  # delegated role.
+  role_keys = {}
+
+  root_key_file1 = os.path.join(keystore_directory, 'root1')
+  root_key_file2 = os.path.join(keystore_directory, 'root2')
+  root_key_file3 = os.path.join(keystore_directory, 'root3')
+  targets_key_file = os.path.join(keystore_directory, 'targets')
+  snapshot_key_file = os.path.join(keystore_directory, 'snapshot')
+  timestamp_key_file = os.path.join(keystore_directory, 'timestamp')
+  preview_key_file = os.path.join(keystore_directory, 'preview')
+  production_key_file = os.path.join(keystore_directory, 'production')
+
+  role_keys = {'root1': {}, 'root2': {}, 'root3': {}, 'targets': {}, 'snapshot': {}, 'timestamp': {},
+               'preview': {}, 'production' : {}}
+  # Import the top-level and delegated role public keys.
+  role_keys['root1']['public'] = \
+    repo_tool.import_rsa_publickey_from_file(root_key_file1+'.pub')
+  role_keys['root2']['public'] = \
+    repo_tool.import_rsa_publickey_from_file(root_key_file2+'.pub')
+  role_keys['root3']['public'] = \
+    repo_tool.import_rsa_publickey_from_file(root_key_file3+'.pub')
+  role_keys['targets']['public'] = \
+    repo_tool.import_rsa_publickey_from_file(targets_key_file+'.pub')
+  role_keys['snapshot']['public'] = \
+    repo_tool.import_rsa_publickey_from_file(snapshot_key_file+'.pub')
+  role_keys['timestamp']['public'] = \
+      repo_tool.import_rsa_publickey_from_file(timestamp_key_file+'.pub')
+  role_keys['preview']['public'] = \
+      repo_tool.import_rsa_publickey_from_file(preview_key_file+'.pub')
+  role_keys['production']['public'] = \
+      repo_tool.import_rsa_publickey_from_file(production_key_file+'.pub')
+
+  # Import the private keys of the top-level and delegated roles.
+  role_keys['root1']['private'] = \
+    repo_tool.import_rsa_privatekey_from_file(root_key_file1,
+                                              'rootpassword1')
+  role_keys['root2']['private'] = \
+    repo_tool.import_rsa_privatekey_from_file(root_key_file2,
+                                              'rootpassword2')
+  role_keys['root3']['private'] = \
+    repo_tool.import_rsa_privatekey_from_file(root_key_file3,
+                                              'rootpassword3')
+
+  role_keys['targets']['private'] = \
+    repo_tool.import_rsa_privatekey_from_file(targets_key_file,
+                                              'targetspassword')
+  role_keys['snapshot']['private'] = \
+    repo_tool.import_rsa_privatekey_from_file(snapshot_key_file)
+  role_keys['timestamp']['private'] = \
+    repo_tool.import_rsa_privatekey_from_file(timestamp_key_file)
+  role_keys['preview']['private'] = \
+    repo_tool.import_rsa_privatekey_from_file(preview_key_file)
+  role_keys['production']['private'] = \
+    repo_tool.import_rsa_privatekey_from_file(production_key_file,
+                                              'productionpassword')
+
+    # up
+  return role_keys
