@@ -5,6 +5,8 @@ import logging
 import tuf.exceptions
 import six
 import errno
+import tempfile
+import tuf.client.git
 
 
 
@@ -36,6 +38,28 @@ class RemoteMetadataUpdater(MetadataUpdater):
     logger.error('Failed to update ' + repr(filename) + ' from'
         ' all mirrors: ' + repr(errors))
     raise tuf.exceptions.NoWorkingMirrorError(errors)
+
+
+class GitMetadataUpdater(MetadataUpdater):
+
+
+  def __init__(self, mirrors):
+    super(GitMetadataUpdater, self).__init__(mirrors)
+    # repository
+    # validation_auth_repo is a freshly cloned
+    # bare repository. It is cloned to a temporary
+    # directory that should be removed once the update
+    # is completed
+    auth_url = mirrors['mirror1']['url_prefix']
+    self._clone_validation_repo(auth_url)
+
+
+
+  def _clone_validation_repo(self, url):
+    temp_dir = tempfile.gettempdir()
+    self.validation_auth_repo = tuf.client.git.BareGitRepo(temp_dir)
+    self.validation_auth_repo.clone(url)
+    self.validation_auth_repo.fetch(fetch_all=True)
 
 
 class TargetsHandler(object):
@@ -463,3 +487,7 @@ class FileTargetsHandler(TargetsHandler):
         raise
 
     target_file_object.move(destination)
+
+
+class RepositoryTargetsHandler(TargetsHandler):
+  pass
