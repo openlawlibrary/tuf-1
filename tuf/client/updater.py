@@ -139,6 +139,7 @@ import tuf.mirrors
 import tuf.roledb
 import tuf.sig
 import tuf.exceptions
+import tuf.client.handlers as handlers
 
 import securesystemslib.hash
 import securesystemslib.keys
@@ -629,7 +630,9 @@ class Updater(object):
     http://www.python.org/dev/peps/pep-0008/#method-names-and-instance-variables
   """
 
-  def __init__(self, repository_name, repository_mirrors):
+  def __init__(self, repository_name, repository_mirrors,
+    update_handler_cls=handlers.RemoteMetadataUpdater,
+    targets_handler_cls=handlers.FileTargetsHandler):
     """
     <Purpose>
       Constructor.  Instantiating an updater object causes all the metadata
@@ -696,6 +699,7 @@ class Updater(object):
 
     # Save the validated arguments.
     self.repository_name = repository_name
+    self.update_handler = update_handler_cls(repository_mirrors)
     self.mirrors = repository_mirrors
 
     # Store the trusted metadata read from disk.
@@ -726,6 +730,9 @@ class Updater(object):
     # determines if metadata and target files downloaded from remote
     # repositories include the digest.
     self.consistent_snapshot = False
+
+    self.targets_handler = targets_handler_cls(repository_mirrors,
+        self.consistent_snapshot, repository_name)
 
     # Ensure the repository metadata directory has been set.
     if tuf.settings.repositories_directory is None:
@@ -1156,205 +1163,20 @@ class Updater(object):
 
 
   def _check_hashes(self, file_object, trusted_hashes):
-    """
-    <Purpose>
-      Non-public method that verifies multiple secure hashes of the downloaded
-      file 'file_object'.  If any of these fail it raises an exception.  This is
-      to conform with the TUF spec, which support clients with different hashing
-      algorithms. The 'hash.py' module is used to compute the hashes of
-      'file_object'.
-
-    <Arguments>
-      file_object:
-        A 'securesystemslib.util.TempFile' file-like object.  'file_object'
-        ensures that a read() without a size argument properly reads the entire
-        file.
-
-      trusted_hashes:
-        A dictionary with hash-algorithm names as keys and hashes as dict values.
-        The hashes should be in the hexdigest format.  Should be Conformant to
-        'securesystemslib.formats.HASHDICT_SCHEMA'.
-
-    <Exceptions>
-      securesystemslib.exceptions.BadHashError, if the hashes don't match.
-
-    <Side Effects>
-      Hash digest object is created using the 'securesystemslib.hash' module.
-
-    <Returns>
-      None.
-    """
-
-    # Verify each trusted hash of 'trusted_hashes'.  If all are valid, simply
-    # return.
-    for algorithm, trusted_hash in six.iteritems(trusted_hashes):
-      digest_object = securesystemslib.hash.digest(algorithm)
-      digest_object.update(file_object.read())
-      computed_hash = digest_object.hexdigest()
-
-      # Raise an exception if any of the hashes are incorrect.
-      if trusted_hash != computed_hash:
-        raise securesystemslib.exceptions.BadHashError(trusted_hash,
-            computed_hash)
-
-      else:
-        logger.info('The file\'s ' + algorithm + ' hash is'
-            ' correct: ' + trusted_hash)
-
+    self.targets_handler._check_hashes(file_object, trusted_hashes)
 
 
 
 
   def _hard_check_file_length(self, file_object, trusted_file_length):
-    """
-    <Purpose>
-      Non-public method that ensures the length of 'file_object' is strictly
-      equal to 'trusted_file_length'.  This is a deliberately redundant
-      implementation designed to complement
-      tuf.download._check_downloaded_length().
-
-    <Arguments>
-      file_object:
-        A 'securesystemslib.util.TempFile' file-like object.  'file_object'
-        ensures that a read() without a size argument properly reads the entire
-        file.
-
-      trusted_file_length:
-        A non-negative integer that is the trusted length of the file.
-
-    <Exceptions>
-      tuf.exceptions.DownloadLengthMismatchError, if the lengths do not match.
-
-    <Side Effects>
-      Reads the contents of 'file_object' and logs a message if 'file_object'
-      matches the trusted length.
-
-    <Returns>
-      None.
-    """
-
-    # Read the entire contents of 'file_object', a
-    # 'securesystemslib.util.TempFile' file-like object that ensures the entire
-    # file is read.
-    observed_length = len(file_object.read())
-
-    # Return and log a message if the length 'file_object' is equal to
-    # 'trusted_file_length', otherwise raise an exception.  A hard check
-    # ensures that a downloaded file strictly matches a known, or trusted,
-    # file length.
-    if observed_length != trusted_file_length:
-      raise tuf.exceptions.DownloadLengthMismatchError(trusted_file_length,
-          observed_length)
-
-    else:
-      logger.debug('Observed length (' + str(observed_length) +\
-          ') == trusted length (' + str(trusted_file_length) + ')')
+    self.targets_handler._hard_check_file_length(file_object, trusted_file_length)
 
 
 
 
 
   def _soft_check_file_length(self, file_object, trusted_file_length):
-    """
-    <Purpose>
-      Non-public method that checks the trusted file length of a
-      'securesystemslib.util.TempFile' file-like object. The length of the file
-      must be less than or equal to the expected length. This is a deliberately
-      redundant implementation designed to complement
-      tuf.download._check_downloaded_length().
-
-    <Arguments>
-      file_object:
-        A 'securesystemslib.util.TempFile' file-like object.  'file_object'
-        ensures that a read() without a size argument properly reads the entire
-        file.
-
-      trusted_file_length:
-        A non-negative integer that is the trusted length of the file.
-
-    <Exceptions>
-      tuf.exceptions.DownloadLengthMismatchError, if the lengths do
-      not match.
-
-    <Side Effects>
-      Reads the contents of 'file_object' and logs a message if 'file_object'
-      is less than or equal to the trusted length.
-
-    <Returns>
-      None.
-    """
-
-    # Read the entire contents of 'file_object', a
-    # 'securesystemslib.util.TempFile' file-like object that ensures the entire
-    # file is read.
-    observed_length = len(file_object.read())
-
-    # Return and log a message if 'file_object' is less than or equal to
-    # 'trusted_file_length', otherwise raise an exception.  A soft check
-    # ensures that an upper bound restricts how large a file is downloaded.
-    if observed_length > trusted_file_length:
-      raise tuf.exceptions.DownloadLengthMismatchError(trusted_file_length,
-          observed_length)
-
-    else:
-      logger.debug('Observed length (' + str(observed_length) +\
-          ') <= trusted length (' + str(trusted_file_length) + ')')
-
-
-
-
-
-  def _get_target_file(self, target_filepath, file_length, file_hashes):
-    """
-    <Purpose>
-      Non-public method that safely (i.e., the file length and hash are
-      strictly equal to the trusted) downloads a target file up to a certain
-      length, and checks its hashes thereafter.
-
-    <Arguments>
-      target_filepath:
-        The target filepath (relative to the repository targets directory)
-        obtained from TUF targets metadata.
-
-      file_length:
-        The expected compressed length of the target file. If the file is not
-        compressed, then it will simply be its uncompressed length.
-
-      file_hashes:
-        The expected hashes of the target file.
-
-    <Exceptions>
-      tuf.exceptions.NoWorkingMirrorError:
-        The target could not be fetched. This is raised only when all known
-        mirrors failed to provide a valid copy of the desired target file.
-
-    <Side Effects>
-      The target file is downloaded from all known repository mirrors in the
-      worst case. If a valid copy of the target file is found, it is stored in
-      a temporary file and returned.
-
-    <Returns>
-      A 'securesystemslib.util.TempFile' file-like object containing the target.
-    """
-
-    # Define a callable function that is passed as an argument to _get_file()
-    # and called.  The 'verify_target_file' function ensures the file length
-    # and hashes of 'target_filepath' are strictly equal to the trusted values.
-    def verify_target_file(target_file_object):
-
-      # Every target file must have its length and hashes inspected.
-      self._hard_check_file_length(target_file_object, file_length)
-      self._check_hashes(target_file_object, file_hashes)
-
-    if self.consistent_snapshot:
-      # Note: values() does not return a list in Python 3.  Use list()
-      # on values() for Python 2+3 compatibility.
-      target_digest = list(file_hashes.values()).pop()
-      dirname, basename = os.path.split(target_filepath)
-      target_filepath = os.path.join(dirname, target_digest + '.' + basename)
-
-    return self._get_file(target_filepath, verify_target_file,
-        'target', file_length, download_safely=True)
+    self.targets_handler._soft_check_file_length(file_object, trusted_file_length)
 
 
 
@@ -1472,17 +1294,16 @@ class Updater(object):
       metadata.
     """
 
-    file_mirrors = tuf.mirrors.get_list_of_mirrors('meta', remote_filename,
-        self.mirrors)
+    file_locations = self.update_handler.get_file_locations(remote_filename)
 
     # file_mirror (URL): error (Exception)
     file_mirror_errors = {}
     file_object = None
 
-    for file_mirror in file_mirrors:
+    for file_mirror in file_locations:
       try:
-        file_object = tuf.download.unsafe_download(file_mirror,
-            upperbound_filelength)
+        file_object = self.update_handler.get_file(file_mirror=file_mirror,
+            upperbound_filelength=upperbound_filelength)
 
         # Verify 'file_object' according to the callable function.
         # 'file_object' is also verified if decompressed above (i.e., the
@@ -1549,15 +1370,14 @@ class Updater(object):
         file_object = None
 
       else:
+        self.update_handler.on_successful_update(file_mirror)
         break
 
     if file_object:
       return file_object
 
     else:
-      logger.error('Failed to update ' + repr(remote_filename) + ' from all'
-        ' mirrors: ' + repr(file_mirror_errors))
-      raise tuf.exceptions.NoWorkingMirrorError(file_mirror_errors)
+      self.update_handler.on_unsuccessful_update(remote_filename, file_mirror_errors)
 
 
 
@@ -1578,98 +1398,10 @@ class Updater(object):
           ' by previous threshold of keys.')
 
 
-
-
-
   def _get_file(self, filepath, verify_file_function, file_type, file_length,
       download_safely=True):
-    """
-    <Purpose>
-      Non-public method that tries downloading, up to a certain length, a
-      metadata or target file from a list of known mirrors. As soon as the first
-      valid copy of the file is found, the rest of the mirrors will be skipped.
-
-    <Arguments>
-      filepath:
-        The relative metadata or target filepath.
-
-      verify_file_function:
-        A callable function that expects a 'securesystemslib.util.TempFile'
-        file-like object and raises an exception if the file is invalid.
-        Target files and uncompressed versions of metadata may be verified with
-        'verify_file_function'.
-
-      file_type:
-        Type of data needed for download, must correspond to one of the strings
-        in the list ['meta', 'target'].  'meta' for metadata file type or
-        'target' for target file type.  It should correspond to the
-        'securesystemslib.formats.NAME_SCHEMA' format.
-
-      file_length:
-        The expected length, or upper bound, of the target or metadata file to
-        be downloaded.
-
-      download_safely:
-        A boolean switch to toggle safe or unsafe download of the file.
-
-    <Exceptions>
-      tuf.exceptions.NoWorkingMirrorError:
-        The metadata could not be fetched. This is raised only when all known
-        mirrors failed to provide a valid copy of the desired metadata file.
-
-    <Side Effects>
-      The file is downloaded from all known repository mirrors in the worst
-      case. If a valid copy of the file is found, it is stored in a temporary
-      file and returned.
-
-    <Returns>
-      A 'securesystemslib.util.TempFile' file-like object containing the
-      metadata or target.
-    """
-
-    file_mirrors = tuf.mirrors.get_list_of_mirrors(file_type, filepath,
-        self.mirrors)
-
-    # file_mirror (URL): error (Exception)
-    file_mirror_errors = {}
-    file_object = None
-
-    for file_mirror in file_mirrors:
-      try:
-        # TODO: Instead of the more fragile 'download_safely' switch, unroll
-        # the function into two separate ones: one for "safe" download, and the
-        # other one for "unsafe" download? This should induce safer and more
-        # readable code.
-        if download_safely:
-          file_object = tuf.download.safe_download(file_mirror, file_length)
-
-        else:
-          file_object = tuf.download.unsafe_download(file_mirror, file_length)
-
-        # Verify 'file_object' according to the callable function.
-        # 'file_object' is also verified if decompressed above (i.e., the
-        # uncompressed version).
-        verify_file_function(file_object)
-
-      except Exception as exception:
-        # Remember the error from this mirror, and "reset" the target file.
-        logger.exception('Update failed from ' + file_mirror + '.')
-        file_mirror_errors[file_mirror] = exception
-        file_object = None
-
-      else:
-        break
-
-    if file_object:
-      return file_object
-
-    else:
-      logger.error('Failed to update ' + repr(filepath) + ' from'
-          ' all mirrors: ' + repr(file_mirror_errors))
-      raise tuf.exceptions.NoWorkingMirrorError(file_mirror_errors)
-
-
-
+    self.targets_handler._get_file(filepath, verify_file_function, file_type,
+      file_length, download_safely)
 
 
   def _update_metadata(self, metadata_role, upperbound_filelength, version=None):
@@ -2964,65 +2696,7 @@ class Updater(object):
 
 
   def remove_obsolete_targets(self, destination_directory):
-    """
-    <Purpose>
-      Remove any files that are in 'previous' but not 'current'.  This makes it
-      so if you remove a file from a repository, it actually goes away.  The
-      targets for the 'targets' role and all delegated roles are checked.
-
-    <Arguments>
-      destination_directory:
-        The directory containing the target files tracked by TUF.
-
-    <Exceptions>
-      securesystemslib.exceptions.FormatError:
-        If 'destination_directory' is improperly formatted.
-
-      tuf.exceptions.RepositoryError:
-        If an error occurred removing any files.
-
-    <Side Effects>
-      Target files are removed from disk.
-
-    <Returns>
-      None.
-    """
-
-    # Does 'destination_directory' have the correct format?
-    # Raise 'securesystemslib.exceptions.FormatError' if there is a mismatch.
-    securesystemslib.formats.PATH_SCHEMA.check_match(destination_directory)
-
-    # Iterate the rolenames and verify whether the 'previous' directory
-    # contains a target no longer found in 'current'.
-    for role in tuf.roledb.get_rolenames(self.repository_name):
-      if role.startswith('targets'):
-        if role in self.metadata['previous'] and self.metadata['previous'][role] != None:
-          for target in self.metadata['previous'][role]['targets']:
-            if target not in self.metadata['current'][role]['targets']:
-              # 'target' is only in 'previous', so remove it.
-              logger.warning('Removing obsolete file: ' + repr(target) + '.')
-
-              # Remove the file if it hasn't been removed already.
-              destination = \
-                os.path.join(destination_directory, target.lstrip(os.sep))
-              try:
-                os.remove(destination)
-
-              except OSError as e:
-                # If 'filename' already removed, just log it.
-                if e.errno == errno.ENOENT:
-                  logger.info('File ' + repr(destination) + ' was already'
-                    ' removed.')
-
-                else:
-                  logger.error(str(e))
-
-            else:
-              logger.debug('Skipping: ' + repr(target) + '.  It is still'
-                ' a current target.')
-        else:
-          logger.debug('Skipping: ' + repr(role) + '.  Not in the previous'
-            ' metadata')
+    self.targets_handler.remove_obsolete_targets(destination_directory, self.metadata)
 
 
 
@@ -3031,9 +2705,20 @@ class Updater(object):
   def updated_targets(self, targets, destination_directory):
     """
     <Purpose>
-      Return the targets in 'targets' that have changed.  Targets are considered
-      changed if they do not exist at 'destination_directory' or the target
-      located there has mismatched file properties.
+      Checks files in the provided directory against the provided file metadata.
+
+      Filters the provided target info, returning a subset: only the metadata
+      for targets for which the target file either does not exist in the
+      provided directory, or for which the target file in the provided directory
+      does not match the provided metadata.
+
+      A principle use of this function is to determine which target files need
+      to be downloaded.  If the caller first uses get_one_valid_target_info()
+      calls to obtain up-to-date, valid metadata for targets, the caller can
+      then call updated_targets() to determine if that metadata does not match
+      what exists already on disk (in the provided directory).  The returned
+      values can then be used in download_file() calls to update the files that
+      didn't exist or didn't match.
 
       The returned information is a list conformant to
       'tuf.formats.TARGETINFOS_SCHEMA' and has the form:
@@ -3045,8 +2730,10 @@ class Updater(object):
 
     <Arguments>
       targets:
-        A list of target files.  Targets that come earlier in the list are
-        chosen over duplicates that may occur later.
+        Metadata about the expected state of target files, against which local
+        files will be checked. This should be a list of target info
+        dictionaries; i.e. 'targets' must be conformant to
+        tuf.formats.TARGETINFOS_SCHEMA.
 
       destination_directory:
         The directory containing the target files.
@@ -3059,8 +2746,9 @@ class Updater(object):
       The files in 'targets' are read and their hashes computed.
 
     <Returns>
-      A list of targets, conformant to
+      A list of target info dictionaries. The list conforms to
       'tuf.formats.TARGETINFOS_SCHEMA'.
+      This is a strict subset of the argument 'targets'.
     """
 
     # Do the arguments have the correct format?
@@ -3115,80 +2803,4 @@ class Updater(object):
 
 
   def download_target(self, target, destination_directory):
-    """
-    <Purpose>
-      Download 'target' and verify it is trusted.
-
-      This will only store the file at 'destination_directory' if the
-      downloaded file matches the description of the file in the trusted
-      metadata.
-
-    <Arguments>
-      target:
-        The target to be downloaded.  Conformant to
-        'tuf.formats.TARGETINFO_SCHEMA'.
-
-      destination_directory:
-        The directory to save the downloaded target file.
-
-    <Exceptions>
-      securesystemslib.exceptions.FormatError:
-        If 'target' is not properly formatted.
-
-      tuf.exceptions.NoWorkingMirrorError:
-        If a target could not be downloaded from any of the mirrors.
-
-        Although expected to be rare, there might be OSError exceptions (except
-        errno.EEXIST) raised when creating the destination directory (if it
-        doesn't exist).
-
-    <Side Effects>
-      A target file is saved to the local system.
-
-    <Returns>
-      None.
-    """
-
-    # Do the arguments have the correct format?
-    # This check ensures the arguments have the appropriate
-    # number of objects and object types, and that all dict
-    # keys are properly named.
-    # Raise 'securesystemslib.exceptions.FormatError' if the check fail.
-    tuf.formats.TARGETINFO_SCHEMA.check_match(target)
-    securesystemslib.formats.PATH_SCHEMA.check_match(destination_directory)
-
-    # Extract the target file information.
-    target_filepath = target['filepath']
-    trusted_length = target['fileinfo']['length']
-    trusted_hashes = target['fileinfo']['hashes']
-
-    # '_get_target_file()' checks every mirror and returns the first target
-    # that passes verification.
-    target_file_object = self._get_target_file(target_filepath, trusted_length,
-        trusted_hashes)
-
-    # We acquired a target file object from a mirror.  Move the file into place
-    # (i.e., locally to 'destination_directory').  Note: join() discards
-    # 'destination_directory' if 'target_path' contains a leading path
-    # separator (i.e., is treated as an absolute path).
-    destination = os.path.join(destination_directory,
-        target_filepath.lstrip(os.sep))
-    destination = os.path.abspath(destination)
-    target_dirpath = os.path.dirname(destination)
-
-    # When attempting to create the leaf directory of 'target_dirpath', ignore
-    # any exceptions raised if the root directory already exists.  All other
-    # exceptions potentially thrown by os.makedirs() are re-raised.
-    # Note: os.makedirs can raise OSError if the leaf directory already exists
-    # or cannot be created.
-    try:
-      os.makedirs(target_dirpath)
-
-    except OSError as e:
-      if e.errno == errno.EEXIST:
-        pass
-
-      else:
-        raise
-
-    target_file_object.move(destination)
+    self.targets_handler.download_target(target, destination_directory)
