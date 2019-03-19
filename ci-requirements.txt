@@ -1,4 +1,4 @@
-securesystemslib[crypto,pynacl]
+oll-securesystemslib[crypto,pynacl]
 six
 iso8601
 coverage
