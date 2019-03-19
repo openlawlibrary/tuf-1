@@ -81,7 +81,7 @@ with open('README.md') as file_object:
 
 setup(
   name = 'oll-tuf',
-  version = '0.11.2.dev3', # If updating version, also update it in tuf/__init__.py
+  version = '0.11.2.dev4', # If updating version, also update it in tuf/__init__.py
   description = 'Open Law Library fork of TUF',
   long_description = long_description,
   long_description_content_type='text/markdown',
@@ -114,7 +114,7 @@ setup(
     'iso8601>=0.1.12',
     'requests>=2.19.1',
     'six>=1.11.0',
-    'oll-securesystemslib>=0.11.3'
+    'oll-securesystemslib==0.11.3.dev1'
   ],
   packages = find_packages(exclude=['tests']),
   scripts = [
