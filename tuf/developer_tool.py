@@ -391,6 +391,7 @@ class Project(Targets):
         self._log_status(self.project_name, signable, self.repository_name)
 
       except securesystemslib.exceptions.Error as e:
+        # pylint: disable=unsubscriptable-object
         signable = e[1]
         self._log_status(self.project_name, signable, self.repository_name)
         return
