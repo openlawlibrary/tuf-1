@@ -35,6 +35,56 @@ class MetadataUpdater(object):
     self.mirrors = mirrors
     self.repository_directory = repository_directory
 
+
+
+  def on_successful_update(self, filename, mirror):
+    """
+    <Purpose>
+      React to successful update of a metadata file 'filename'.
+      Called after file 'filename' is downloaded from 'mirror' and all
+      validation checks pass
+    <Arguments>
+      filename:
+        The relative file path (on the remote repository) of a metadata role.
+
+      mirror:
+        The mirror from which the file was successfully downloaded.
+
+
+    <Exceptions>
+      None.
+
+    Side Effects>
+      None.
+
+    <Returns>
+      None.
+    """
+
+
+
+  def on_unsuccessful_update(self, filename):
+    """
+    <Purpose>
+      React to unsuccessful update of a metadata file 'filename'. Called
+      after all attempts to download file 'filename' fail.
+
+
+    <Arguments>
+      filename:
+        The relative file path (on the remote repository) of a metadata role.
+
+
+    <Exceptions>
+      None.
+
+    Side Effects>
+      None.
+
+    <Returns>
+      None
+    """
+
 class RemoteMetadataUpdater(MetadataUpdater):
   """
   Subclass of 'MetadataUpdater' which handles the case of
@@ -103,56 +153,3 @@ class RemoteMetadataUpdater(MetadataUpdater):
     """
     return tuf.download.unsafe_download(file_mirror,
         _upperbound_filelength)
-
-
-  def on_successful_update(self, filename, mirror):
-    """
-    <Purpose>
-      React to successful update of a metadata file 'filename'. Called
-      after file 'filename' is downloaded from 'mirror' and all
-      validation checks pass. In this case, nothing needs to be done,
-      so the method is empty.
-
-
-    <Arguments>
-      filename:
-        The relative file path (on the remote repository) of a metadata role.
-
-      mirror:
-        The mirror from whih th file was successfully downloaded.
-
-
-    <Exceptions>
-      None.
-
-    Side Effects>
-      None.
-
-    <Returns>
-      None.
-    """
-
-
-
-  def on_unsuccessful_update(self, filename):
-    """
-    <Purpose>
-      React to unsuccessful update of a metadata file 'filename'. Called
-      after all attempts to download file 'filename' fail.
-      In this case, nothing needs to be done, so the method is empty.
-
-
-    <Arguments>
-      filename:
-        The relative file path (on the remote repository) of a metadata role.
-
-
-    <Exceptions>
-      None.
-
-    Side Effects>
-      None.
-
-    <Returns>
-      None
-    """
