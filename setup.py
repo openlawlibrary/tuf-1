@@ -82,7 +82,7 @@ with open('README.md') as file_object:
 setup(
   name = 'oll-tuf',
   version = '0.11.2.dev3', # If updating version, also update it in tuf/__init__.py
-  description = 'A secure updater framework for Python',
+  description = 'Open Law Library fork of TUF',
   long_description = long_description,
   long_description_content_type='text/markdown',
   author = 'https://www.updateframework.com',
