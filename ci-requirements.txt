@@ -1,4 +1,4 @@
-securesystemslib[crypto,pynacl]
+oll-securesystemslib[crypto,pynacl]==0.11.3.dev3
 six
 iso8601
 coverage
