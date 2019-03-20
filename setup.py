@@ -80,9 +80,9 @@ with open('README.md') as file_object:
 
 
 setup(
-  name = 'tuf',
-  version = '0.11.2.dev3', # If updating version, also update it in tuf/__init__.py
-  description = 'A secure updater framework for Python',
+  name = 'oll-tuf',
+  version = '0.11.2.dev5', # If updating version, also update it in tuf/__init__.py
+  description = 'Open Law Library fork of TUF',
   long_description = long_description,
   long_description_content_type='text/markdown',
   author = 'https://www.updateframework.com',
@@ -114,7 +114,7 @@ setup(
     'iso8601>=0.1.12',
     'requests>=2.19.1',
     'six>=1.11.0',
-    'securesystemslib>=0.11.3'
+    'oll-securesystemslib==0.11.3.dev3'
   ],
   packages = find_packages(exclude=['tests']),
   scripts = [
