@@ -566,7 +566,7 @@ class Metadata(object):
     self._repository_name = None
 
 
-  def add_verification_key(self, key, expires=None):
+  def add_verification_key(self, key, expires=None, external=False):
     """
     <Purpose>
       Add 'key' to the role.  Adding a key, which should contain only the
@@ -590,6 +590,12 @@ class Metadata(object):
       expires:
         The date in which 'key' expires.  'expires' is a datetime.datetime()
         object.
+
+      external:
+        Indicates if signature will be provided externaly.
+        Private key can't be always loaded with `load_signing_key` function.
+        E.G. Hardware device (like YubiKey) is write-only and signing happens
+        only on it.
 
     <Exceptions>
       securesystemslib.exceptions.FormatError, if any of the arguments are
@@ -657,6 +663,10 @@ class Metadata(object):
     # Update the key's 'expires' entry.
     expires = expires.isoformat() + 'Z'
     key['expires'] = expires
+
+    # Add flag for external keys
+    if external:
+      key['external'] = True
 
     # Ensure 'key', which should contain the public portion, is added to
     # 'tuf.keydb.py'.  Add 'key' to the list of recognized keys.

@@ -1294,9 +1294,10 @@ def generate_root_metadata(version, expiration_date, consistent_snapshot,
           keytype = key['keytype']
           keyval = key['keyval']
           scheme = key['scheme']
+          external = key.get('external', False)
           keydict[keyid] = \
             securesystemslib.keys.format_keyval_to_metadata(keytype,
-                scheme, keyval, private=False)
+                scheme, keyval, external, private=False)
 
         # This is not a recognized key.  Raise an exception.
         else:
