@@ -98,6 +98,17 @@ SNAPSHOT_EXPIRATION = 604800
 TIMESTAMP_EXPIRATION = 86400
 
 
+
+class Signer(object):
+  @property
+  def key_id(self):
+    raise NotImplementedError()
+
+  def sign(self, key, signed):
+    raise NotImplementedError()
+
+
+
 class Repository(object):
   """
   <Purpose>
@@ -805,6 +816,30 @@ class Metadata(object):
       tuf.roledb.update_roleinfo(self.rolename, roleinfo,
           repository_name=self._repository_name)
 
+
+
+  def load_signing_key_external(self, signer):
+    """
+    - Requires public key to be loaded before
+    """
+    if not isinstance(signer, Signer):
+      raise securesystemslib.exceptions.Error(
+        'Signer has to be inherited from Signer class.')
+
+    roleinfo = tuf.roledb.get_roleinfo(self.rolename, self._repository_name)
+    if signer.key_id not in roleinfo['keyids']:
+      raise securesystemslib.exceptions.Error('Public key is not loaded!')
+
+    if signer.key_id not in roleinfo['signing_keyids']:
+      roleinfo['signing_keyids'].append(signer.key_id)
+
+      if roleinfo.get('external_signers', None) is None:
+        roleinfo['external_signers'] = {}
+
+      roleinfo['external_signers'][signer.key_id] = signer.sign
+
+      tuf.roledb.update_roleinfo(self.rolename, roleinfo,
+          repository_name=self._repository_name)
 
 
   def unload_signing_key(self, key):
