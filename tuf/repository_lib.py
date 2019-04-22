@@ -1705,8 +1705,7 @@ def sign_metadata(metadata_object, keyids, external_signers, filename, repositor
 
       # External keys
       if keyid in external_signers:
-        data = securesystemslib.formats.encode_canonical(signed)
-        signature = external_signers[keyid](key, data)
+        signature = external_signers[keyid].sign(key, signed)
         signable['signatures'].append(signature)
 
       else:
