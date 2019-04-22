@@ -189,8 +189,7 @@ KEY_SCHEMA = SCHEMA.Object(
   object_name = 'KEY_SCHEMA',
   keytype = SCHEMA.AnyString(),
   keyval = KEYVAL_SCHEMA,
-  expires = SCHEMA.Optional(ISO8601_DATETIME_SCHEMA),
-  external = SCHEMA.Optional(SCHEMA.Boolean()))
+  expires = SCHEMA.Optional(ISO8601_DATETIME_SCHEMA))
 
 # A dict where the dict keys hold a keyid and the dict values a key object.
 KEYDICT_SCHEMA = SCHEMA.DictOf(
