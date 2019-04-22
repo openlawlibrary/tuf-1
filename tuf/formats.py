@@ -303,11 +303,9 @@ PATH_FILEINFO_SCHEMA = SCHEMA.DictOf(
   key_schema = RELPATH_SCHEMA,
   value_schema = CUSTOM_SCHEMA)
 
-FUNCTION_SCHEMA = SCHEMA.Any()
-
 EXTERNAL_SIGNERS_SCHEMA = SCHEMA.DictOf(
   key_schema = KEYID_SCHEMA,
-  value_schema = FUNCTION_SCHEMA)
+  value_schema = SCHEMA.Any())
 
 # TUF roledb
 ROLEDB_SCHEMA = SCHEMA.Object(
