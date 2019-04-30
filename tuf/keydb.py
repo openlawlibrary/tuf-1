@@ -33,21 +33,19 @@
   dictionary's 'keyid' key (i.e., rsakey['keyid']).
 """
 
+
 # Help with Python 3 compatibility, where the print statement is a function, an
 # implicit relative import is invalid, and the '/' operator performs true
 # division.  Example:  print 'hello world' raises a 'SyntaxError' exception.
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-import logging
 import copy
-
-import tuf.formats
+import logging
 
 import six
+
 import securesystemslib
+import tuf.formats
 
 # List of strings representing the key types supported by TUF.
 _SUPPORTED_KEY_TYPES = ['rsa', 'ed25519', 'ecdsa-sha2-nistp256']
@@ -58,6 +56,10 @@ logger = logging.getLogger('tuf.keydb')
 # The key database.
 _keydb_dict = {}
 _keydb_dict['default'] = {}
+
+# The signature provider database.
+_signature_providerdb_dict = {}
+_signature_providerdb_dict['default'] = {}
 
 
 def create_keydb_from_root_metadata(root_metadata, repository_name='default'):
@@ -107,6 +109,9 @@ def create_keydb_from_root_metadata(root_metadata, repository_name='default'):
   # Clear the key database for 'repository_name', or create it if non-existent.
   if repository_name in _keydb_dict:
     _keydb_dict[repository_name].clear()
+
+  if repository_name in _signature_providerdb_dict:
+    _signature_providerdb_dict[repository_name].clear()
 
   else:
     create_keydb(repository_name)
@@ -182,6 +187,7 @@ def create_keydb(repository_name):
       ' ' + repr(repository_name))
 
   _keydb_dict[repository_name] = {}
+  _signature_providerdb_dict[repository_name] = {}
 
 
 
@@ -223,10 +229,15 @@ def remove_keydb(repository_name):
 
   del _keydb_dict[repository_name]
 
+  if repository_name in _signature_providerdb_dict:
+    del _signature_providerdb_dict[repository_name]
 
 
 
-def add_key(key_dict, keyid=None, repository_name='default'):
+
+
+def add_key(key_dict, keyid=None, repository_name='default',
+            signature_provider=None):
   """
   <Purpose>
     Add 'rsakey_dict' to the key database while avoiding duplicates.
@@ -297,8 +308,11 @@ def add_key(key_dict, keyid=None, repository_name='default'):
   if keyid in _keydb_dict[repository_name]:
     raise securesystemslib.exceptions.KeyAlreadyExistsError('Key: ' + keyid)
 
-  _keydb_dict[repository_name][keyid] = copy.deepcopy(key_dict)
+  if keyid in _signature_providerdb_dict[repository_name]:
+    raise tuf.exceptions.SignatureProviderAlreadyExistsError('Key id: ' + keyid)
 
+  _keydb_dict[repository_name][keyid] = copy.deepcopy(key_dict)
+  _signature_providerdb_dict[repository_name][keyid] = signature_provider
 
 
 
@@ -356,6 +370,52 @@ def get_key(keyid, repository_name='default'):
 
 
 
+def get_signature_provider(keyid, repository_name='default'):
+  """
+  <Purpose>
+    Return the signature provider for given 'keyid'.
+
+  <Arguments>
+    keyid:
+      An object conformant to 'securesystemslib.formats.KEYID_SCHEMA'.  It is used as an
+      identifier for keys.
+
+    repository_name:
+      The name of the repository to get the key.  If not supplied, the key is
+      retrieved from the 'default' repository.
+
+  <Exceptions>
+    securesystemslib.exceptions.FormatError, if the arguments do not have the correct format.
+
+    securesystemslib.exceptions.InvalidNameError, if 'repository_name' does not exist in the key
+    database.
+
+  <Side Effects>
+    None.
+
+  <Returns>
+    The signature provider matching 'keyid'.
+  """
+  # Does 'keyid' have the correct format?
+  # This check will ensure 'keyid' has the appropriate number of objects
+  # and object types, and that all dict keys are properly named.
+  # Raise 'securesystemslib.exceptions.FormatError' is the match fails.
+  securesystemslib.formats.KEYID_SCHEMA.check_match(keyid)
+
+  # Does 'repository_name' have the correct format?
+  securesystemslib.formats.NAME_SCHEMA.check_match(repository_name)
+
+  if repository_name not in _signature_providerdb_dict:
+    raise securesystemslib.exceptions.InvalidNameError('Repository name does not exist:'
+      ' ' + repr(repository_name))
+
+  # Return the key belonging to 'keyid', if found in the key database.
+  try:
+    return _signature_providerdb_dict[repository_name][keyid]
+  except KeyError:
+    return None
+
+
 
 def remove_key(keyid, repository_name='default'):
   """
@@ -406,6 +466,10 @@ def remove_key(keyid, repository_name='default'):
   else:
     raise securesystemslib.exceptions.UnknownKeyError('Key: ' + keyid)
 
+  # Remove the signature provider belonging to 'keyid'
+  if keyid in _signature_providerdb_dict[repository_name]:
+    del _signature_providerdb_dict[repository_name][keyid]
+
 
 
 
@@ -443,13 +507,17 @@ def clear_keydb(repository_name='default', clear_all=False):
   securesystemslib.formats.BOOLEAN_SCHEMA.check_match(clear_all)
 
   global _keydb_dict
+  global _signature_providerdb_dict
 
   if clear_all:
     _keydb_dict = {}
     _keydb_dict['default'] = {}
+    _signature_providerdb_dict = {}
+    _signature_providerdb_dict['default'] = {}
 
   if repository_name not in _keydb_dict:
     raise securesystemslib.exceptions.InvalidNameError('Repository name does not exist:'
       ' ' + repr(repository_name))
 
   _keydb_dict[repository_name] = {}
+  _signature_providerdb_dict[repository_name] = {}
