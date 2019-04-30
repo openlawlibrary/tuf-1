@@ -23,36 +23,33 @@
   'tuf.repository_tool.py'.
 """
 
+
 # Help with Python 3 compatibility, where the print statement is a function, an
 # implicit relative import is invalid, and the '/' operator performs true
 # division.  Example:  print 'hello world' raises a 'SyntaxError' exception.
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-import os
-import errno
-import time
 import datetime
-import logging
-import tempfile
-import shutil
+import errno
 import json
+import logging
+import os
+import shutil
+import tempfile
+import time
 
-import tuf
-import tuf.formats
-import tuf.roledb
-import tuf.sig
-import tuf.log
-import tuf.exceptions
-import tuf.repository_lib as repo_lib
-
-import securesystemslib.keys
-import securesystemslib.formats
 import iso8601
 import six
 
+import securesystemslib.formats
+import securesystemslib.keys
+import tuf
+import tuf.exceptions
+import tuf.formats
+import tuf.log
+import tuf.repository_lib as repo_lib
+import tuf.roledb
+import tuf.sig
 
 # See 'log.py' to learn how logging is handled in TUF.
 logger = logging.getLogger('tuf.repository_tool')
@@ -736,6 +733,68 @@ class Metadata(object):
       raise securesystemslib.exceptions.Error('Verification key not found.')
 
 
+  def add_external_signature_provider(self, key, signature_provider):
+    """
+    <Purpose>
+      Adds signature provider for a given public key. Provider will be called
+      by TUF, to generate a signature for a given data.
+
+      def example_provider(data):
+        return "signature..."
+
+      If we need a keyid inside the provider, we can do:
+
+      def example_provider(keyid, data):
+        pass
+
+      partial(example_provider, keyid)
+
+      >>>
+      >>>
+      >>>
+
+    <Arguments>
+      key:
+        The role's key, conformant to 'securesystemslib.formats.ANYKEY_SCHEMA'.
+        It must contain the public key portion.
+
+    <Exceptions>
+      securesystemslib.exceptions.FormatError, if 'key' is improperly formatted.
+
+    <Side Effects>
+      Updates the role's 'tuf.keydb.py' and 'tuf.roledb.py' entries.
+
+    <Returns>
+      None.
+    """
+
+    # Does 'keyid' have the correct format?
+    # Ensure the arguments have the appropriate number of objects and object
+    # types, and that all dict keys are properly named.  Raise
+    # 'securesystemslib.exceptions.FormatError' if any are improperly formatted.
+    securesystemslib.formats.ANYKEY_SCHEMA.check_match(key)
+
+    # Has the key, with the private portion included, been added to the keydb?
+    # The public version of the key may have been previously added.
+    try:
+      tuf.keydb.add_key(key,
+                        repository_name=self._repository_name,
+                        signature_provider=signature_provider)
+
+    except securesystemslib.exceptions.KeyAlreadyExistsError:
+      tuf.keydb.remove_key(key['keyid'], self._repository_name)
+      tuf.keydb.add_key(key,
+                        repository_name=self._repository_name,
+                        signature_provider=signature_provider)
+
+    # Update the role's 'signing_keys' field in 'tuf.roledb.py'.
+    roleinfo = tuf.roledb.get_roleinfo(self.rolename, self._repository_name)
+    if key['keyid'] not in roleinfo['signing_keyids']:
+      roleinfo['signing_keyids'].append(key['keyid'])
+
+      tuf.roledb.update_roleinfo(self.rolename, roleinfo,
+          repository_name=self._repository_name)
+
 
   def load_signing_key(self, key):
     """
@@ -794,7 +853,6 @@ class Metadata(object):
 
       tuf.roledb.update_roleinfo(self.rolename, roleinfo,
           repository_name=self._repository_name)
-
 
 
   def unload_signing_key(self, key):

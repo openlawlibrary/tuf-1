@@ -22,17 +22,16 @@
   there is a good reason not to, and provide that reason in those cases.
 """
 
+
 # Help with Python 3 compatibility, where the print statement is a function, an
 # implicit relative import is invalid, and the '/' operator performs true
 # division.  Example:  print 'hello world' raises a 'SyntaxError' exception.
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
+
+import logging
 
 import six
 
-import logging
 logger = logging.getLogger('tuf.exceptions')
 
 
@@ -257,3 +256,7 @@ class URLParsingError(Error):
 class InvalidConfigurationError(Error):
   """If a configuration object does not match the expected format."""
 
+
+class SignatureProviderAlreadyExistsError(Error):
+  """Indicate that a signature provider for keyid already exists and cannot be
+  added."""
