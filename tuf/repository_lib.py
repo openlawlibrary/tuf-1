@@ -23,36 +23,33 @@
   complete guide to using 'tuf.repository_tool.py'.
 """
 
+
 # Help with Python 3 compatibility, where the print statement is a function, an
 # implicit relative import is invalid, and the '/' operator performs true
 # division.  Example:  print 'hello world' raises a 'SyntaxError' exception.
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-import os
 import errno
-import time
-import logging
-import shutil
 import json
+import logging
+import os
 import platform
+import shutil
+import time
 
-import tuf
-import tuf.formats
-import tuf.exceptions
-import tuf.keydb
-import tuf.roledb
-import tuf.sig
-import tuf.log
-import tuf.settings
-
-import securesystemslib
-import securesystemslib.interface
 import iso8601
 import six
 
+import securesystemslib
+import securesystemslib.interface
+import tuf
+import tuf.exceptions
+import tuf.formats
+import tuf.keydb
+import tuf.log
+import tuf.roledb
+import tuf.settings
+import tuf.sig
 
 # See 'log.py' to learn how logging is handled in TUF.
 logger = logging.getLogger('tuf.repository_lib')
@@ -1698,10 +1695,14 @@ def sign_metadata(metadata_object, keyids, filename, repository_name):
 
     # Load the signing key.
     key = tuf.keydb.get_key(keyid, repository_name=repository_name)
+    signature_provider = tuf.keydb.get_signature_provider(keyid,
+                                                          repository_name=repository_name)
+
     # Generate the signature using the appropriate signing method.
     if key['keytype'] in SUPPORTED_KEY_TYPES:
-      if 'private' in key['keyval']:
-        signed = signable['signed']
+      # If private key is loaded with `load_signing_key`
+      signed = signable['signed']
+      if 'private' in key['keyval'] and key['keyval']['private']:
         try:
           signature = securesystemslib.keys.create_signature(key, signed)
           signable['signatures'].append(signature)
@@ -1709,7 +1710,12 @@ def sign_metadata(metadata_object, keyids, filename, repository_name):
         except Exception:
           logger.warning('Unable to create signature for keyid: ' + repr(keyid))
 
+      elif signature_provider:
+        signature = signature_provider(signed)
+        signable['signatures'].append(signature)
+
       else:
+        # If signature provider is registered for a keyid
         logger.debug('Private key unset.  Skipping: ' + repr(keyid))
 
     else:
