@@ -1,6 +1,7 @@
 import tuf
 import logging
 import tuf.exceptions
+import time
 
 logger = logging.getLogger('tuf.client.updater')
 
@@ -35,7 +36,8 @@ class MetadataUpdater(object):
     self.mirrors = mirrors
     self.repository_directory = repository_directory
 
-
+  def earliest_valid_expiration_time(self, metadata_rolename):
+    return int(time.time())
 
   def on_successful_update(self, filename, mirror):
     """

@@ -1424,7 +1424,6 @@ class Updater(object):
     # We previously verified version numbers in this function, but have since
     # moved version number verification to the functions that retrieve
     # metadata.
-
     # Verify the signature on the downloaded metadata object.
     valid = tuf.sig.verify(metadata_signable, metadata_role,
         self.repository_name)
@@ -2334,14 +2333,15 @@ class Updater(object):
     # '1985-10-21T01:22:00Z'.)  Convert it to a unix timestamp and compare it
     # against the current time.time() (also in Unix/POSIX time format, although
     # with microseconds attached.)
-    current_time = int(time.time())
+
+    time = self.update_handler.earliest_valid_expiration_time(metadata_rolename)
 
     # Generate a user-friendly error message if 'expires' is less than the
     # current time (i.e., a local time.)
     expires_datetime = iso8601.parse_date(expires)
     expires_timestamp = tuf.formats.datetime_to_unix_timestamp(expires_datetime)
 
-    if expires_timestamp < current_time:
+    if expires_timestamp < time:
       message = 'Metadata '+repr(metadata_rolename)+' expired on ' + \
         expires_datetime.ctime() + ' (UTC).'
       logger.error(message)
