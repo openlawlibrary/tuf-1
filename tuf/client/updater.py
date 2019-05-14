@@ -1235,7 +1235,6 @@ class Updater(object):
     <Returns>
       None.
     """
-
     # Read the entire contents of 'file_object', a
     # 'securesystemslib.util.TempFile' file-like object that ensures the entire
     # file is read.
@@ -1474,7 +1473,7 @@ class Updater(object):
       metadata.
     """
 
-    file_mirrors = self.update_handler.get_mirrors(remote_filename)
+    file_mirrors = self.update_handler.get_mirrors('meta', remote_filename)
 
     # file_mirror (URL): error (Exception)
     file_mirror_errors = {}
@@ -1632,8 +1631,7 @@ class Updater(object):
       metadata or target.
     """
 
-    file_mirrors = tuf.mirrors.get_list_of_mirrors(file_type, filepath,
-        self.mirrors)
+    file_mirrors = self.update_handler.get_mirrors(file_type, filepath)
 
     # file_mirror (URL): error (Exception)
     file_mirror_errors = {}
@@ -1645,11 +1643,8 @@ class Updater(object):
         # the function into two separate ones: one for "safe" download, and the
         # other one for "unsafe" download? This should induce safer and more
         # readable code.
-        if download_safely:
-          file_object = tuf.download.safe_download(file_mirror, file_length)
-
-        else:
-          file_object = tuf.download.unsafe_download(file_mirror, file_length)
+        file_object = self.update_handler.get_target_file(file_mirror, filepath,
+                                                          file_length, download_safely)
 
         # Verify 'file_object' according to the callable function.
         # 'file_object' is also verified if decompressed above (i.e., the
@@ -3143,8 +3138,7 @@ class Updater(object):
       for algorithm, digest in six.iteritems(target['fileinfo']['hashes']):
         digest_object = None
         try:
-          digest_object = securesystemslib.hash.digest_filename(target_filepath,
-            algorithm=algorithm)
+          digest_object = self.update_handler.get_file_digest(target_filepath, algorithm)
 
         # This exception would occur if the target does not exist locally.
         except IOError:
