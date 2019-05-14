@@ -2,6 +2,7 @@ import tuf
 import logging
 import tuf.exceptions
 import time
+import securesystemslib
 
 logger = logging.getLogger('tuf.client.updater')
 
@@ -94,7 +95,7 @@ class RemoteMetadataUpdater(MetadataUpdater):
   """
 
 
-  def get_mirrors(self, remote_filename):
+  def get_mirrors(self, file_type, filepath):
     """
     <Purpose>
       Finds mirrors from which the specified file can be downloaded.
@@ -114,9 +115,8 @@ class RemoteMetadataUpdater(MetadataUpdater):
     <Returns>
       A list of mirrors from which the specified file can be downloaded.
     """
-    return tuf.mirrors.get_list_of_mirrors('meta', remote_filename,
+    return tuf.mirrors.get_list_of_mirrors(file_type, filepath,
       self.mirrors)
-
 
   def get_metadata_file(self, file_mirror, _filename, _upperbound_filelength):
     """
@@ -155,3 +155,14 @@ class RemoteMetadataUpdater(MetadataUpdater):
     """
     return tuf.download.unsafe_download(file_mirror,
         _upperbound_filelength)
+
+  def get_target_file(self, file_mirror, filepath, file_length, download_safely):
+    if download_safely:
+      file_object = tuf.download.safe_download(file_mirror, file_length)
+    else:
+      file_object = tuf.download.unsafe_download(file_mirror, file_length)
+    return file_object
+
+  def get_file_digest(self, filepath, algorithm):
+    return securesystemslib.hash.digest_filename(filepath,
+                                                 algorithm=algorithm)
