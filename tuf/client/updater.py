@@ -1104,8 +1104,8 @@ class Updater(object):
     # fileinfo referenced there matches what was fetched earlier in
     # _update_root_metadata() or make another attempt to download root.json.
     self._update_metadata_if_changed('snapshot',
-        referenced_metadata='timestamp', ensure_not_expired=True)
-    self._update_metadata_if_changed('targets', ensure_not_expired=True)
+        referenced_metadata='timestamp', ensure_not_changed=True)
+    self._update_metadata_if_changed('targets', ensure_not_changed=True)
 
 
 
@@ -1793,7 +1793,7 @@ class Updater(object):
 
 
   def _update_metadata_if_changed(self, metadata_role,
-    referenced_metadata='snapshot', ensure_not_expired=False):
+    referenced_metadata='snapshot', ensure_not_changed=False):
     """
     <Purpose>
       Non-public method that updates the metadata for 'metadata_role' if it has
@@ -1879,7 +1879,7 @@ class Updater(object):
         expected_versioninfo):
       logger.info(repr(metadata_filename) + ' up-to-date.')
 
-      if ensure_not_expired:
+      if ensure_not_changed:
         self.update_handler.ensure_not_changed(metadata_filename)
 
       # Since we have not downloaded a new version of this metadata, we should
