@@ -40,6 +40,10 @@ class MetadataUpdater(object):
   def earliest_valid_expiration_time(self, metadata_rolename):
     return int(time.time())
 
+  def ensure_not_changed(self, metadata_filename):
+    # not necessary in all cases
+    pass
+
   def on_successful_update(self, filename, mirror):
     """
     <Purpose>
