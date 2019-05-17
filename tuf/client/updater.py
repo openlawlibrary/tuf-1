@@ -124,7 +124,6 @@ import errno
 import logging
 import os
 import shutil
-import time
 import fnmatch
 import copy
 import warnings

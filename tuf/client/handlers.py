@@ -38,6 +38,9 @@ class MetadataUpdater(object):
     self.repository_directory = repository_directory
 
   def earliest_valid_expiration_time(self, metadata_rolename):
+    # pylint: disable=unused-argument
+    # metadata role name is not needed here, but the git updater
+    # does need it
     return int(time.time())
 
   def ensure_not_changed(self, metadata_filename):
@@ -161,6 +164,8 @@ class RemoteMetadataUpdater(MetadataUpdater):
         _upperbound_filelength)
 
   def get_target_file(self, file_mirror, filepath, file_length, download_safely):
+    # pylint: disable=unused-argument
+    # filepath is not needed here, by the git updater needs it
     if download_safely:
       file_object = tuf.download.safe_download(file_mirror, file_length)
     else:
