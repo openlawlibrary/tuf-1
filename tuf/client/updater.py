@@ -1472,7 +1472,7 @@ class Updater(object):
       metadata.
     """
 
-    file_mirrors = self.update_handler.get_mirrors('meta', remote_filename)
+    file_mirrors = self.update_handler.get_mirrors(file_type='meta', file_path=remote_filename)
 
     # file_mirror (URL): error (Exception)
     file_mirror_errors = {}
@@ -1482,7 +1482,7 @@ class Updater(object):
     for file_mirror in file_mirrors:
       try:
         file_object = self.update_handler.get_metadata_file(file_mirror,
-            remote_filename, upperbound_filelength)
+            file_name=remote_filename, upperbound_filelength=upperbound_filelength)
 
         # Verify 'file_object' according to the callable function.
         # 'file_object' is also verified if decompressed above (i.e., the
@@ -1630,7 +1630,7 @@ class Updater(object):
       metadata or target.
     """
 
-    file_mirrors = self.update_handler.get_mirrors(file_type, filepath)
+    file_mirrors = self.update_handler.get_mirrors(file_type=file_type, file_path=filepath)
 
     # file_mirror (URL): error (Exception)
     file_mirror_errors = {}
@@ -1642,9 +1642,10 @@ class Updater(object):
         # the function into two separate ones: one for "safe" download, and the
         # other one for "unsafe" download? This should induce safer and more
         # readable code.
-        file_object = self.update_handler.get_target_file(file_mirror, filepath,
-                                                          file_length, download_safely)
-
+        file_object = self.update_handler.get_target_file(file_mirror,
+                                                          file_path=filepath,
+                                                          file_length=file_length,
+                                                          download_safely=download_safely)
         # Verify 'file_object' according to the callable function.
         # 'file_object' is also verified if decompressed above (i.e., the
         # uncompressed version).
@@ -2331,7 +2332,7 @@ class Updater(object):
     # against the current time.time() (also in Unix/POSIX time format, although
     # with microseconds attached.)
 
-    time = self.update_handler.earliest_valid_expiration_time(metadata_rolename)
+    time = self.update_handler.earliest_valid_expiration_time()
 
     # Generate a user-friendly error message if 'expires' is less than the
     # current time (i.e., a local time.)

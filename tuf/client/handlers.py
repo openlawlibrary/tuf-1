@@ -37,10 +37,7 @@ class MetadataUpdater(object):
     self.mirrors = mirrors
     self.repository_directory = repository_directory
 
-  def earliest_valid_expiration_time(self, metadata_rolename):
-    # pylint: disable=unused-argument
-    # metadata role name is not needed here, but the git updater
-    # does need it
+  def earliest_valid_expiration_time(self):
     return int(time.time())
 
   def ensure_not_changed(self, metadata_filename):
@@ -102,70 +99,20 @@ class RemoteMetadataUpdater(MetadataUpdater):
   """
 
 
-  def get_mirrors(self, file_type, filepath):
-    """
-    <Purpose>
-      Finds mirrors from which the specified file can be downloaded.
+  def get_mirrors(self, **kwargs):
+    file_type = kwargs['file_type']
+    file_path = kwargs['file_path']
+    return tuf.mirrors.get_list_of_mirrors(file_type, file_path,
+        self.mirrors)
 
-
-    <Arguments>
-      remote_filename:
-        The relative file path (on the remote repository) of a metadata role.
-
-
-    <Exceptions>
-      None.
-
-    Side Effects>
-      None.
-
-    <Returns>
-      A list of mirrors from which the specified file can be downloaded.
-    """
-    return tuf.mirrors.get_list_of_mirrors(file_type, filepath,
-      self.mirrors)
-
-  def get_metadata_file(self, file_mirror, _filename, _upperbound_filelength):
-    """
-    <Purpose>
-      Downloads the metadata file from the provided mirror. Calls 'unsafe_download', which,
-      given the 'url' and 'required_length' of the desired file downloads the file and
-      returns its contents.
-
-
-    <Arguments>
-      file_mirror:
-        Mirror from which the file should be downloaded.
-
-      _filename:
-        The relative file path (on the remote repository) of a metadata role.
-
-      _upperbound_filelength:
-        An integer value representing the upper limit of the length of the file.
-
-    <Exceptions>
-      tuf.ssl_commons.exceptions.DownloadLengthMismatchError, if there was a
-      mismatch of observed vs expected lengths while downloading the file.
-
-      securesystemslib.exceptions.FormatError, if any of the arguments are
-      improperly formatted.
-
-      Any other unforeseen runtime exception.
-
-    Side Effects>
-      A 'securesystemslib.util.TempFile' object is created on disk to store the
-      contents of 'url'.
-
-    <Returns>
-      A 'securesystemslib.util.TempFile' file-like object that points to the
-      contents of 'url'.
-    """
+  def get_metadata_file(self, file_mirror, **kwargs):
+    upperbound_filelength = kwargs['upperbound_filelength']
     return tuf.download.unsafe_download(file_mirror,
-        _upperbound_filelength)
+        upperbound_filelength)
 
-  def get_target_file(self, file_mirror, filepath, file_length, download_safely):
-    # pylint: disable=unused-argument
-    # filepath is not needed here, by the git updater needs it
+  def get_target_file(self, file_mirror, **kwargs):
+    download_safely = kwargs['download_safely']
+    file_length = kwargs['file_length']
     if download_safely:
       file_object = tuf.download.safe_download(file_mirror, file_length)
     else:
