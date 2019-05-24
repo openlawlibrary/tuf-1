@@ -33,9 +33,10 @@ class MetadataUpdater(object):
   <Returns>
     None.
   """
-  def __init__(self, mirrors, repository_directory):
+  def __init__(self, mirrors, repository_directory, repository_name):
     self.mirrors = mirrors
     self.repository_directory = repository_directory
+    self.repository_name = repository_name
 
   def earliest_valid_expiration_time(self):
     return int(time.time())
@@ -99,20 +100,14 @@ class RemoteMetadataUpdater(MetadataUpdater):
   """
 
 
-  def get_mirrors(self, **kwargs):
-    file_type = kwargs['file_type']
-    file_path = kwargs['file_path']
+  def get_mirrors(self, file_type, file_path):
     return tuf.mirrors.get_list_of_mirrors(file_type, file_path,
         self.mirrors)
 
-  def get_metadata_file(self, file_mirror, **kwargs):
-    upperbound_filelength = kwargs['upperbound_filelength']
-    return tuf.download.unsafe_download(file_mirror,
-        upperbound_filelength)
+  def get_metadata_file(self, file_mirror, _file_name, upperbound_filelength):
+    return tuf.download.unsafe_download(file_mirror, upperbound_filelength)
 
-  def get_target_file(self, file_mirror, **kwargs):
-    download_safely = kwargs['download_safely']
-    file_length = kwargs['file_length']
+  def get_target_file(self, file_mirror, file_length, download_safely):
     if download_safely:
       file_object = tuf.download.safe_download(file_mirror, file_length)
     else:

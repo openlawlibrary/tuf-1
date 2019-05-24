@@ -736,10 +736,10 @@ class Updater(object):
 
     # Set the path for the current set of metadata files.
     repositories_directory = tuf.settings.repositories_directory
+    self.update_handler = update_handler_cls(repository_mirrors, repositories_directory, repository_name)
+
     repository_directory = os.path.join(repositories_directory, self.repository_name)
     current_path = os.path.join(repository_directory, 'metadata', 'current')
-    self.update_handler = update_handler_cls(repository_mirrors, repository_directory)
-
     # Ensure the current path is valid/exists before saving it.
     if not os.path.exists(current_path):
       raise tuf.exceptions.RepositoryError('Missing'
@@ -1472,7 +1472,7 @@ class Updater(object):
       metadata.
     """
 
-    file_mirrors = self.update_handler.get_mirrors(file_type='meta', file_path=remote_filename)
+    file_mirrors = self.update_handler.get_mirrors('meta', remote_filename)
 
     # file_mirror (URL): error (Exception)
     file_mirror_errors = {}
@@ -1482,7 +1482,7 @@ class Updater(object):
     for file_mirror in file_mirrors:
       try:
         file_object = self.update_handler.get_metadata_file(file_mirror,
-            file_name=remote_filename, upperbound_filelength=upperbound_filelength)
+            remote_filename, upperbound_filelength)
 
         # Verify 'file_object' according to the callable function.
         # 'file_object' is also verified if decompressed above (i.e., the
@@ -1630,7 +1630,7 @@ class Updater(object):
       metadata or target.
     """
 
-    file_mirrors = self.update_handler.get_mirrors(file_type=file_type, file_path=filepath)
+    file_mirrors = self.update_handler.get_mirrors(file_type, filepath)
 
     # file_mirror (URL): error (Exception)
     file_mirror_errors = {}
@@ -1642,10 +1642,8 @@ class Updater(object):
         # the function into two separate ones: one for "safe" download, and the
         # other one for "unsafe" download? This should induce safer and more
         # readable code.
-        file_object = self.update_handler.get_target_file(file_mirror,
-                                                          file_path=filepath,
-                                                          file_length=file_length,
-                                                          download_safely=download_safely)
+        file_object = self.update_handler.get_target_file(file_mirror, filepath,
+                                                          file_length, download_safely)
         # Verify 'file_object' according to the callable function.
         # 'file_object' is also verified if decompressed above (i.e., the
         # uncompressed version).
