@@ -46,7 +46,6 @@ class MetadataUpdater(object):
     to the reference metadata did remain the same. Not necessary in all
     cases
     """
-    pass
 
   def on_successful_update(self, filename, mirror):
     """

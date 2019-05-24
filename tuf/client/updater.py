@@ -2330,14 +2330,14 @@ class Updater(object):
     # against the current time.time() (also in Unix/POSIX time format, although
     # with microseconds attached.)
 
-    time = self.update_handler.earliest_valid_expiration_time()
+    earliest_exp_time  = self.update_handler.earliest_valid_expiration_time()
 
     # Generate a user-friendly error message if 'expires' is less than the
     # current time (i.e., a local time.)
     expires_datetime = iso8601.parse_date(expires)
     expires_timestamp = tuf.formats.datetime_to_unix_timestamp(expires_datetime)
 
-    if expires_timestamp < time:
+    if expires_timestamp < earliest_exp_time :
       message = 'Metadata '+repr(metadata_rolename)+' expired on ' + \
         expires_datetime.ctime() + ' (UTC).'
       logger.error(message)
