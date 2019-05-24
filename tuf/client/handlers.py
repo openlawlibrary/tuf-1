@@ -42,7 +42,10 @@ class MetadataUpdater(object):
     return int(time.time())
 
   def ensure_not_changed(self, metadata_filename):
-    # not necessary in all cases
+    """Checks if a metadata file which should remain the same according
+    to the reference metadata did remain the same. Not necessary in all
+    cases
+    """
     pass
 
   def on_successful_update(self, filename, mirror):
