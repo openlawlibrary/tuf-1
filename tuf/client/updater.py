@@ -1642,8 +1642,8 @@ class Updater(object):
         # the function into two separate ones: one for "safe" download, and the
         # other one for "unsafe" download? This should induce safer and more
         # readable code.
-        file_object = self.update_handler.get_target_file(file_mirror, filepath,
-                                                          file_length, download_safely)
+        file_object = self.update_handler.get_target_file(file_mirror, file_length,
+                                                          download_safely, filepath)
         # Verify 'file_object' according to the callable function.
         # 'file_object' is also verified if decompressed above (i.e., the
         # uncompressed version).

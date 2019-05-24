@@ -107,7 +107,7 @@ class RemoteMetadataUpdater(MetadataUpdater):
   def get_metadata_file(self, file_mirror, _file_name, upperbound_filelength):
     return tuf.download.unsafe_download(file_mirror, upperbound_filelength)
 
-  def get_target_file(self, file_mirror, file_length, download_safely):
+  def get_target_file(self, file_mirror, file_length, download_safely, _file_path=None):
     if download_safely:
       file_object = tuf.download.safe_download(file_mirror, file_length)
     else:
