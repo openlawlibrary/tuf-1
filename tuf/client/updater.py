@@ -124,7 +124,6 @@ import errno
 import logging
 import os
 import shutil
-import time
 import fnmatch
 import copy
 import warnings
@@ -737,10 +736,10 @@ class Updater(object):
 
     # Set the path for the current set of metadata files.
     repositories_directory = tuf.settings.repositories_directory
+    self.update_handler = update_handler_cls(repository_mirrors, repositories_directory, repository_name)
+
     repository_directory = os.path.join(repositories_directory, self.repository_name)
     current_path = os.path.join(repository_directory, 'metadata', 'current')
-    self.update_handler = update_handler_cls(repository_mirrors, repository_directory)
-
     # Ensure the current path is valid/exists before saving it.
     if not os.path.exists(current_path):
       raise tuf.exceptions.RepositoryError('Missing'
@@ -1104,8 +1103,8 @@ class Updater(object):
     # fileinfo referenced there matches what was fetched earlier in
     # _update_root_metadata() or make another attempt to download root.json.
     self._update_metadata_if_changed('snapshot',
-        referenced_metadata='timestamp')
-    self._update_metadata_if_changed('targets')
+        referenced_metadata='timestamp', ensure_not_changed=True)
+    self._update_metadata_if_changed('targets', ensure_not_changed=True)
 
 
 
@@ -1235,7 +1234,6 @@ class Updater(object):
     <Returns>
       None.
     """
-
     # Read the entire contents of 'file_object', a
     # 'securesystemslib.util.TempFile' file-like object that ensures the entire
     # file is read.
@@ -1424,7 +1422,6 @@ class Updater(object):
     # We previously verified version numbers in this function, but have since
     # moved version number verification to the functions that retrieve
     # metadata.
-
     # Verify the signature on the downloaded metadata object.
     valid = tuf.sig.verify(metadata_signable, metadata_role,
         self.repository_name)
@@ -1475,7 +1472,7 @@ class Updater(object):
       metadata.
     """
 
-    file_mirrors = self.update_handler.get_mirrors(remote_filename)
+    file_mirrors = self.update_handler.get_mirrors('meta', remote_filename)
 
     # file_mirror (URL): error (Exception)
     file_mirror_errors = {}
@@ -1633,8 +1630,7 @@ class Updater(object):
       metadata or target.
     """
 
-    file_mirrors = tuf.mirrors.get_list_of_mirrors(file_type, filepath,
-        self.mirrors)
+    file_mirrors = self.update_handler.get_mirrors(file_type, filepath)
 
     # file_mirror (URL): error (Exception)
     file_mirror_errors = {}
@@ -1646,12 +1642,8 @@ class Updater(object):
         # the function into two separate ones: one for "safe" download, and the
         # other one for "unsafe" download? This should induce safer and more
         # readable code.
-        if download_safely:
-          file_object = tuf.download.safe_download(file_mirror, file_length)
-
-        else:
-          file_object = tuf.download.unsafe_download(file_mirror, file_length)
-
+        file_object = self.update_handler.get_target_file(file_mirror, file_length,
+                                                          download_safely, filepath)
         # Verify 'file_object' according to the callable function.
         # 'file_object' is also verified if decompressed above (i.e., the
         # uncompressed version).
@@ -1799,7 +1791,7 @@ class Updater(object):
 
 
   def _update_metadata_if_changed(self, metadata_role,
-    referenced_metadata='snapshot'):
+    referenced_metadata='snapshot', ensure_not_changed=False):
     """
     <Purpose>
       Non-public method that updates the metadata for 'metadata_role' if it has
@@ -1884,6 +1876,9 @@ class Updater(object):
     if not self._versioninfo_has_been_updated(metadata_filename,
         expected_versioninfo):
       logger.info(repr(metadata_filename) + ' up-to-date.')
+
+      if ensure_not_changed:
+        self.update_handler.ensure_not_changed(metadata_filename)
 
       # Since we have not downloaded a new version of this metadata, we should
       # check to see if our local version is stale and notify the user if so.
@@ -2334,14 +2329,15 @@ class Updater(object):
     # '1985-10-21T01:22:00Z'.)  Convert it to a unix timestamp and compare it
     # against the current time.time() (also in Unix/POSIX time format, although
     # with microseconds attached.)
-    current_time = int(time.time())
+
+    earliest_exp_time  = self.update_handler.earliest_valid_expiration_time()
 
     # Generate a user-friendly error message if 'expires' is less than the
     # current time (i.e., a local time.)
     expires_datetime = iso8601.parse_date(expires)
     expires_timestamp = tuf.formats.datetime_to_unix_timestamp(expires_datetime)
 
-    if expires_timestamp < current_time:
+    if expires_timestamp < earliest_exp_time :
       message = 'Metadata '+repr(metadata_rolename)+' expired on ' + \
         expires_datetime.ctime() + ' (UTC).'
       logger.error(message)
@@ -3143,8 +3139,7 @@ class Updater(object):
       for algorithm, digest in six.iteritems(target['fileinfo']['hashes']):
         digest_object = None
         try:
-          digest_object = securesystemslib.hash.digest_filename(target_filepath,
-            algorithm=algorithm)
+          digest_object = self.update_handler.get_file_digest(target_filepath, algorithm)
 
         # This exception would occur if the target does not exist locally.
         except IOError:

@@ -1,6 +1,8 @@
 import tuf
 import logging
 import tuf.exceptions
+import time
+import securesystemslib
 
 logger = logging.getLogger('tuf.client.updater')
 
@@ -31,11 +33,19 @@ class MetadataUpdater(object):
   <Returns>
     None.
   """
-  def __init__(self, mirrors, repository_directory):
+  def __init__(self, mirrors, repository_directory, repository_name):
     self.mirrors = mirrors
     self.repository_directory = repository_directory
+    self.repository_name = repository_name
 
+  def earliest_valid_expiration_time(self):
+    return int(time.time())
 
+  def ensure_not_changed(self, metadata_filename):
+    """Checks if a metadata file which should remain the same according
+    to the reference metadata did remain the same. Not necessary in all
+    cases
+    """
 
   def on_successful_update(self, filename, mirror):
     """
@@ -92,64 +102,20 @@ class RemoteMetadataUpdater(MetadataUpdater):
   """
 
 
-  def get_mirrors(self, remote_filename):
-    """
-    <Purpose>
-      Finds mirrors from which the specified file can be downloaded.
+  def get_mirrors(self, file_type, file_path):
+    return tuf.mirrors.get_list_of_mirrors(file_type, file_path,
+        self.mirrors)
 
+  def get_metadata_file(self, file_mirror, _file_name, upperbound_filelength):
+    return tuf.download.unsafe_download(file_mirror, upperbound_filelength)
 
-    <Arguments>
-      remote_filename:
-        The relative file path (on the remote repository) of a metadata role.
+  def get_target_file(self, file_mirror, file_length, download_safely, _file_path=None):
+    if download_safely:
+      file_object = tuf.download.safe_download(file_mirror, file_length)
+    else:
+      file_object = tuf.download.unsafe_download(file_mirror, file_length)
+    return file_object
 
-
-    <Exceptions>
-      None.
-
-    Side Effects>
-      None.
-
-    <Returns>
-      A list of mirrors from which the specified file can be downloaded.
-    """
-    return tuf.mirrors.get_list_of_mirrors('meta', remote_filename,
-      self.mirrors)
-
-
-  def get_metadata_file(self, file_mirror, _filename, _upperbound_filelength):
-    """
-    <Purpose>
-      Downloads the metadata file from the provided mirror. Calls 'unsafe_download', which,
-      given the 'url' and 'required_length' of the desired file downloads the file and
-      returns its contents.
-
-
-    <Arguments>
-      file_mirror:
-        Mirror from which the file should be downloaded.
-
-      _filename:
-        The relative file path (on the remote repository) of a metadata role.
-
-      _upperbound_filelength:
-        An integer value representing the upper limit of the length of the file.
-
-    <Exceptions>
-      tuf.ssl_commons.exceptions.DownloadLengthMismatchError, if there was a
-      mismatch of observed vs expected lengths while downloading the file.
-
-      securesystemslib.exceptions.FormatError, if any of the arguments are
-      improperly formatted.
-
-      Any other unforeseen runtime exception.
-
-    Side Effects>
-      A 'securesystemslib.util.TempFile' object is created on disk to store the
-      contents of 'url'.
-
-    <Returns>
-      A 'securesystemslib.util.TempFile' file-like object that points to the
-      contents of 'url'.
-    """
-    return tuf.download.unsafe_download(file_mirror,
-        _upperbound_filelength)
+  def get_file_digest(self, filepath, algorithm):
+    return securesystemslib.hash.digest_filename(filepath,
+                                                 algorithm=algorithm)
