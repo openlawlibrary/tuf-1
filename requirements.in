@@ -1,6 +1,6 @@
 # requirements.in for pip-compile.
 
-securesystemslib
+oll-securesystemslib
 cryptography
 colorama
 pynacl
