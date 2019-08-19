@@ -1711,7 +1711,7 @@ def sign_metadata(metadata_object, keyids, filename, repository_name):
           logger.warning('Unable to create signature for keyid: ' + repr(keyid))
 
       elif signature_provider:
-        signature = signature_provider(signed)
+        signature = signature_provider(key, signed) # Key without private part
         signable['signatures'].append(signature)
 
       else:
