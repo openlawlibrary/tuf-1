@@ -79,7 +79,7 @@ with open('README.md') as file_object:
 
 setup(
     name='oll-tuf',
-    version='0.11.2.dev6',  # If updating version, also update it in tuf/__init__.py
+    version='0.11.2.dev7',  # If updating version, also update it in tuf/__init__.py
     description='Open Law Library fork of TUF',
     long_description=long_description,
     long_description_content_type='text/markdown',
