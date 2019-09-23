@@ -784,7 +784,7 @@ def generate_and_write_rsa_keypair(filepath, bits=DEFAULT_RSA_KEY_BITS,
 
 
 
-def import_rsa_privatekey_from_file(filepath, password=None):
+def import_rsa_privatekey_from_file(filepath, password=None, scheme='rsassa-pss-sha256'):
   """
   <Purpose>
     Import the encrypted PEM file in 'filepath', decrypt it, and return the key
@@ -797,6 +797,9 @@ def import_rsa_privatekey_from_file(filepath, password=None):
 
     password:
       The passphrase to decrypt 'filepath'.
+
+    scheme:
+      The signature scheme used by the imported key.
 
   <Exceptions>
     securesystemslib.exceptions.FormatError, if the arguments are improperly
@@ -818,14 +821,14 @@ def import_rsa_privatekey_from_file(filepath, password=None):
   # given.
   try:
     private_key = securesystemslib.interface.import_rsa_privatekey_from_file(
-        filepath, password)
+        filepath, password, scheme)
 
   # The user might not have given a password for an encrypted private key.
   # Prompt for a password for convenience.
   except securesystemslib.exceptions.CryptoError:
     if password is None:
       private_key = securesystemslib.interface.import_rsa_privatekey_from_file(
-          filepath, password, prompt=True)
+          filepath, password, scheme, prompt=True)
 
     else:
       raise
@@ -836,7 +839,7 @@ def import_rsa_privatekey_from_file(filepath, password=None):
 
 
 
-def import_rsa_publickey_from_file(filepath):
+def import_rsa_publickey_from_file(filepath, scheme='rsassa-pss-sha256'):
   """
   <Purpose>
     Import the RSA key stored in 'filepath'.  The key object returned is a TUF
@@ -846,6 +849,9 @@ def import_rsa_publickey_from_file(filepath):
   <Arguments>
     filepath:
       <filepath>.pub file, an RSA PEM file.
+
+    scheme:
+      The signature scheme used by the imported key.
 
   <Exceptions>
     securesystemslib.exceptions.FormatError, if 'filepath' is improperly formatted.
@@ -860,7 +866,7 @@ def import_rsa_publickey_from_file(filepath):
     An RSA key object conformant to 'securesystemslib.RSAKEY_SCHEMA'.
   """
 
-  return securesystemslib.interface.import_rsa_publickey_from_file(filepath)
+  return securesystemslib.interface.import_rsa_publickey_from_file(filepath, scheme)
 
 
 
