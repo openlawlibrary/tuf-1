@@ -1,0 +1,16 @@
+{
+  "python.pythonPath": "./env/bin/python",
+  "editor.tabSize": 2,
+  "python.formatting.autopep8Args": [
+    "--indent-size=2",
+    "--max-line-length=99"
+  ],
+  "python.linting.pep8Args": [
+    "--indent-size=2",
+    "--max-line-length=99"
+  ],
+  "python.sortImports.args": [
+    "-l",
+    "99"
+  ]
+}

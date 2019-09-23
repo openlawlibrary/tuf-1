@@ -3236,11 +3236,11 @@ def generate_and_write_rsa_keypair(filepath=None,
 def generate_rsa_key(bits=DEFAULT_RSA_KEY_BITS, scheme='rsassa-pss-sha256'):
   return securesystemslib.keys.generate_rsa_key(bits, scheme)
 
-def import_rsa_publickey_from_file(filepath):
-  return repo_lib.import_rsa_publickey_from_file(filepath)
+def import_rsa_publickey_from_file(filepath, scheme='rsassa-pss-sha256'):
+  return repo_lib.import_rsa_publickey_from_file(filepath, scheme)
 
-def import_rsa_privatekey_from_file(filepath, password=None):
-  return repo_lib.import_rsa_privatekey_from_file(filepath, password)
+def import_rsa_privatekey_from_file(filepath, password=None, scheme='rsassa-pss-sha256'):
+  return repo_lib.import_rsa_privatekey_from_file(filepath, password, scheme)
 
 def import_rsakey_from_pem(pem, scheme='rsassa-pss-sha256'):
   return securesystemslib.keys.import_rsakey_from_pem(pem, scheme)
