@@ -91,9 +91,9 @@ iso8601==0.1.12 \
     --hash=sha256:210e0134677cc0d02f6028087fee1df1e1d76d372ee1db0bf30bf66c5c1c89a3 \
     --hash=sha256:49c4b20e1f38aa5cf109ddcd39647ac419f928512c869dc01d5c7098eddede82 \
     --hash=sha256:bbbae5fb4a7abfe71d4688fd64bff70b91bbd74ef6a99d964bab18f7fdf286dd
-oll-securesystemslib==0.11.3.dev4 \
-    --hash=sha256:19310d6211d0a288ec06dd82f322486694576cc17e7918c80d7bf5d86ce11798 \
-    --hash=sha256:87faf8d90034cbd192d39b3b48a5719de33009a673b38b0163c55276113bef76
+oll-securesystemslib==0.11.3.dev7 \
+    --hash=sha256:af546c6ee5db9a1b0a9cb19e0b4c9910bce370883e08b86fc57059898e0435e7 \
+    --hash=sha256:cfa0fb975a147d35611cfdd7b418fb2d615ade8adff357f4096e53413773681e
 pycparser==2.19 \
     --hash=sha256:a988718abfad80b6b157acce7bf130a30876d27603738ac39f140993246b25b3 \
     # via cffi
