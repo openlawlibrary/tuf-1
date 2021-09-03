@@ -22,13 +22,11 @@
 """
 
 import os
-import time
-import datetime
 import unittest
 import logging
 import tempfile
 import shutil
-import unittest
+import sys
 
 import tuf
 import tuf.log
@@ -38,11 +36,14 @@ import tuf.developer_tool as developer_tool
 import tuf.exceptions
 
 import securesystemslib
+import securesystemslib.exceptions
 
 from tuf.developer_tool import METADATA_DIRECTORY_NAME
 from tuf.developer_tool import TARGETS_DIRECTORY_NAME
 
-logger = logging.getLogger('tuf.test_developer_tool')
+from tests import utils
+
+logger = logging.getLogger(__name__)
 
 developer_tool.disable_console_log_messages()
 
@@ -54,13 +55,11 @@ class TestProject(unittest.TestCase):
   def setUpClass(cls):
     cls.tmp_dir = tempfile.mkdtemp(dir = os.getcwd())
 
+
   @classmethod
   def tearDownClass(cls):
     shutil.rmtree(cls.tmp_dir)
 
-  def setUp(self):
-    # called before every test case
-    pass
 
   def tearDown(self):
     # called after every test case
@@ -170,7 +169,7 @@ class TestProject(unittest.TestCase):
       developer_tool.create_new_project(project_name, metadata_directory,
           location_in_repository, targets_directory, project_key)
 
-    except (OSError, securesystemslib.exceptions.RepositoryError):
+    except (OSError, tuf.exceptions.RepositoryError):
       pass
 
     developer_tool.METADATA_DIRECTORY_NAME = valid_metadata_directory_name
@@ -188,7 +187,8 @@ class TestProject(unittest.TestCase):
 
     # Test non-existent project filepath.
     nonexistent_path = os.path.join(local_tmp, 'nonexistent')
-    self.assertRaises(IOError, developer_tool.load_project, nonexistent_path)
+    self.assertRaises(securesystemslib.exceptions.StorageError,
+        developer_tool.load_project, nonexistent_path)
 
     # Copy the pregenerated metadata.
     project_data_filepath = os.path.join('repository_data', 'project')
@@ -424,4 +424,5 @@ class TestProject(unittest.TestCase):
 
 
 if __name__ == '__main__':
+  utils.configure_test_logging(sys.argv)
   unittest.main()

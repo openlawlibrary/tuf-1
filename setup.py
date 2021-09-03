@@ -40,12 +40,9 @@
   $ pip install .
 
   # Installing optional requirements (i.e., after installing tuf).
-  # The 'tools' optional requirement is currently supported, which enables
-  # fast and secure ed25519 key generation, and signature verification
-  # computations with PyNaCl+libsodium.  General-purpose cryptography is also
-  # provided.  'tools' is needed by the TUF repository tools.  Clients that
-  # require verification of RSASSA-PSS signatures must also install tuf[tools].
-  $ pip install tuf[tools]
+  # Support for creation of Ed25519 signatures and support for RSA and ECDSA
+  # signatures in general requires optional dependencies:
+  $ pip install securesystemslib[crypto,pynacl]
 
 
   Alternate installation options:
@@ -78,46 +75,53 @@ with open('README.md') as file_object:
 
 
 setup(
-    name='oll-tuf',
-    version='0.11.2.dev9',  # If updating version, also update it in tuf/__init__.py
-    description='Open Law Library fork of TUF',
-    long_description=long_description,
-    long_description_content_type='text/markdown',
-    author='https://www.updateframework.com',
-    author_email='theupdateframework@googlegroups.com',
-    url='https://www.updateframework.com',
-    keywords='update updater secure authentication key compromise revocation',
-    classifiers=[
-        'Development Status :: 4 - Beta',
-        'Intended Audience :: Developers',
-        'License :: OSI Approved :: MIT License',
-        'License :: OSI Approved :: Apache Software License',
-        'Natural Language :: English',
-        'Operating System :: POSIX',
-        'Operating System :: POSIX :: Linux',
-        'Operating System :: MacOS :: MacOS X',
-        'Operating System :: Microsoft :: Windows',
-        'Programming Language :: Python',
-        'Programming Language :: Python :: 2',
-        'Programming Language :: Python :: 2.7',
-        'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.4',
-        'Programming Language :: Python :: 3.5',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: Implementation :: CPython',
-        'Topic :: Security',
-        'Topic :: Software Development'
-    ],
-    install_requires=[
-        'iso8601>=0.1.12',
-        'requests>=2.19.1',
-        'six>=1.11.0',
-        'oll-securesystemslib==0.11.3.dev7'
-    ],
-    packages=find_packages(exclude=['tests']),
-    scripts=[
-        'tuf/scripts/repo.py',
-        'tuf/scripts/client.py',
-        'tuf/scripts/simple_server.py',
-    ]
+  name = 'oll-tuf',
+  version = '0.17.0', # If updating version, also update it in tuf/__init__.py
+  description = 'Open Law Library fork of TUF',
+  long_description = long_description,
+  long_description_content_type='text/markdown',
+  author = 'https://www.updateframework.com',
+  author_email = 'theupdateframework@googlegroups.com',
+  url = 'https://www.updateframework.com',
+  keywords = 'update updater secure authentication key compromise revocation',
+  classifiers = [
+    'Development Status :: 4 - Beta',
+    'Intended Audience :: Developers',
+    'License :: OSI Approved :: MIT License',
+    'License :: OSI Approved :: Apache Software License',
+    'Natural Language :: English',
+    'Operating System :: POSIX',
+    'Operating System :: POSIX :: Linux',
+    'Operating System :: MacOS :: MacOS X',
+    'Operating System :: Microsoft :: Windows',
+    'Programming Language :: Python',
+    'Programming Language :: Python :: 2',
+    'Programming Language :: Python :: 2.7',
+    'Programming Language :: Python :: 3',
+    'Programming Language :: Python :: 3.6',
+    'Programming Language :: Python :: 3.7',
+    'Programming Language :: Python :: 3.8',
+    'Programming Language :: Python :: 3.9',
+    'Programming Language :: Python :: Implementation :: CPython',
+    'Topic :: Security',
+    'Topic :: Software Development'
+  ],
+  project_urls={
+    'Source': 'https://github.com/theupdateframework/tuf',
+    'Issues': 'https://github.com/theupdateframework/tuf/issues'
+  },
+  python_requires=">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.5.*, <4",
+  install_requires = [
+    'requests>=2.19.1',
+    'six>=1.11.0',
+    'securesystemslib>=0.18.0'
+  ],
+  tests_require = [
+    'mock; python_version < "3.3"'
+  ],
+  packages = find_packages(exclude=['tests']),
+  scripts = [
+    'tuf/scripts/repo.py',
+    'tuf/scripts/client.py'
+  ]
 )

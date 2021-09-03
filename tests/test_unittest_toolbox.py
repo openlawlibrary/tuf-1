@@ -31,10 +31,13 @@ from __future__ import unicode_literals
 import unittest
 import logging
 import shutil
+import sys
 
 import tuf.unittest_toolbox as unittest_toolbox
 
-logger = logging.getLogger('test_unittest_toolbox')
+from tests import utils
+
+logger = logging.getLogger(__name__)
 
 
 class TestUnittestToolbox(unittest_toolbox.Modified_TestCase):
@@ -55,4 +58,5 @@ class TestUnittestToolbox(unittest_toolbox.Modified_TestCase):
 
 # Run the unit tests.
 if __name__ == '__main__':
+  utils.configure_test_logging(sys.argv)
   unittest.main()

@@ -41,14 +41,11 @@ from __future__ import unicode_literals
 
 import os
 import tempfile
-import random
-import time
 import shutil
 import json
-import subprocess
 import logging
-import sys
 import unittest
+import sys
 
 import tuf
 import tuf.formats
@@ -57,18 +54,18 @@ import tuf.client.updater as updater
 import tuf.unittest_toolbox as unittest_toolbox
 import tuf.roledb
 
+from tests import utils
+
 import securesystemslib
 import six
 
-logger = logging.getLogger('tuf.test_endless_data_attack')
+logger = logging.getLogger(__name__)
 
 
 class TestEndlessDataAttack(unittest_toolbox.Modified_TestCase):
 
   @classmethod
   def setUpClass(cls):
-    # setUpClass() is called before any of the test cases are executed.
-
     # Create a temporary directory to store the repository, metadata, and target
     # files.  'temporary_directory' must be deleted in TearDownModule() so that
     # temporary files are always removed, even when exceptions occur.
@@ -81,33 +78,19 @@ class TestEndlessDataAttack(unittest_toolbox.Modified_TestCase):
     # the pre-generated metadata files have a specific structure, such
     # as a delegated role 'targets/role1', three target files, five key files,
     # etc.
-    cls.SERVER_PORT = random.randint(30000, 45000)
-    command = ['python', 'simple_server.py', str(cls.SERVER_PORT)]
-    cls.server_process = subprocess.Popen(command, stderr=subprocess.PIPE)
-    logger.info('Server process started.')
-    logger.info('Server process id: '+str(cls.server_process.pid))
-    logger.info('Serving on port: '+str(cls.SERVER_PORT))
-    cls.url = 'http://localhost:'+str(cls.SERVER_PORT) + os.path.sep
-
-    # NOTE: Following error is raised if a delay is not applied:
-    # <urlopen error [Errno 111] Connection refused>
-    time.sleep(.8)
+    cls.server_process_handler = utils.TestServerProcess(log=logger)
 
 
 
   @classmethod
   def tearDownClass(cls):
-    # tearDownModule() is called after all the test cases have run.
-    # http://docs.python.org/2/library/unittest.html#class-and-module-fixtures
+    # Cleans the resources and flush the logged lines (if any).
+    cls.server_process_handler.clean()
 
     # Remove the temporary repository directory, which should contain all the
     # metadata, targets, and key files generated of all the test cases.
     shutil.rmtree(cls.temporary_directory)
 
-    # Kill the SimpleHTTPServer process.
-    if cls.server_process.returncode is None:
-      logger.info('Server process '+str(cls.server_process.pid)+' terminated.')
-      cls.server_process.kill()
 
 
 
@@ -143,16 +126,15 @@ class TestEndlessDataAttack(unittest_toolbox.Modified_TestCase):
     # Set the url prefix required by the 'tuf/client/updater.py' updater.
     # 'path/to/tmp/repository' -> 'localhost:8001/tmp/repository'.
     repository_basepath = self.repository_directory[len(os.getcwd()):]
-    url_prefix = \
-      'http://localhost:' + str(self.SERVER_PORT) + repository_basepath
+    url_prefix = 'http://localhost:' \
+        + str(self.server_process_handler.port) + repository_basepath
 
     # Setting 'tuf.settings.repository_directory' with the temporary client
     # directory copied from the original repository files.
     tuf.settings.repositories_directory = self.client_directory
     self.repository_mirrors = {'mirror1': {'url_prefix': url_prefix,
                                            'metadata_path': 'metadata',
-                                           'targets_path': 'targets',
-                                           'confined_target_dirs': ['']}}
+                                           'targets_path': 'targets'}}
 
     # Create the repository instance.  The test cases will use this client
     # updater to refresh metadata, fetch target files, etc.
@@ -166,6 +148,10 @@ class TestEndlessDataAttack(unittest_toolbox.Modified_TestCase):
     unittest_toolbox.Modified_TestCase.tearDown(self)
     tuf.roledb.clear_roledb(clear_all=True)
     tuf.keydb.clear_keydb(clear_all=True)
+
+    # Logs stdout and stderr from the sever subprocess.
+    self.server_process_handler.flush_log()
+
 
 
   def test_without_tuf(self):
@@ -184,7 +170,7 @@ class TestEndlessDataAttack(unittest_toolbox.Modified_TestCase):
     client_target_path = os.path.join(self.client_directory, 'file1.txt')
     self.assertFalse(os.path.exists(client_target_path))
     length, hashes = securesystemslib.util.get_file_details(target_path)
-    fileinfo = tuf.formats.make_fileinfo(length, hashes)
+    fileinfo = tuf.formats.make_targets_fileinfo(length, hashes)
 
     url_prefix = self.repository_mirrors['mirror1']['url_prefix']
     url_file = os.path.join(url_prefix, 'targets', 'file1.txt')
@@ -194,7 +180,7 @@ class TestEndlessDataAttack(unittest_toolbox.Modified_TestCase):
 
     self.assertTrue(os.path.exists(client_target_path))
     length, hashes = securesystemslib.util.get_file_details(client_target_path)
-    download_fileinfo = tuf.formats.make_fileinfo(length, hashes)
+    download_fileinfo = tuf.formats.make_targets_fileinfo(length, hashes)
     self.assertEqual(fileinfo, download_fileinfo)
 
     # Test: Download a target file that has been modified by an attacker with
@@ -202,7 +188,7 @@ class TestEndlessDataAttack(unittest_toolbox.Modified_TestCase):
     with open(target_path, 'a') as file_object:
       file_object.write('append large amount of data' * 100000)
     large_length, hashes = securesystemslib.util.get_file_details(target_path)
-    malicious_fileinfo = tuf.formats.make_fileinfo(large_length, hashes)
+    malicious_fileinfo = tuf.formats.make_targets_fileinfo(large_length, hashes)
 
     # Is the modified file actually larger?
     self.assertTrue(large_length > length)
@@ -211,7 +197,7 @@ class TestEndlessDataAttack(unittest_toolbox.Modified_TestCase):
     six.moves.urllib.request.urlretrieve(url_file.replace('\\', '/'), client_target_path)
 
     length, hashes = securesystemslib.util.get_file_details(client_target_path)
-    download_fileinfo = tuf.formats.make_fileinfo(length, hashes)
+    download_fileinfo = tuf.formats.make_targets_fileinfo(length, hashes)
 
     # Verify 'download_fileinfo' is unequal to the original trusted version.
     self.assertNotEqual(download_fileinfo, fileinfo)
@@ -235,10 +221,10 @@ class TestEndlessDataAttack(unittest_toolbox.Modified_TestCase):
     # Verify the client's downloaded file matches the repository's.
     target_path = os.path.join(self.repository_directory, 'targets', 'file1.txt')
     length, hashes = securesystemslib.util.get_file_details(client_target_path)
-    fileinfo = tuf.formats.make_fileinfo(length, hashes)
+    fileinfo = tuf.formats.make_targets_fileinfo(length, hashes)
 
     length, hashes = securesystemslib.util.get_file_details(client_target_path)
-    download_fileinfo = tuf.formats.make_fileinfo(length, hashes)
+    download_fileinfo = tuf.formats.make_targets_fileinfo(length, hashes)
     self.assertEqual(fileinfo, download_fileinfo)
 
     # Modify 'file1.txt' and confirm that the TUF client only downloads up to
@@ -257,7 +243,7 @@ class TestEndlessDataAttack(unittest_toolbox.Modified_TestCase):
     # extra data appended should be discarded by the client, so the downloaded
     # file size and hash should not have changed.
     length, hashes = securesystemslib.util.get_file_details(client_target_path)
-    download_fileinfo = tuf.formats.make_fileinfo(length, hashes)
+    download_fileinfo = tuf.formats.make_targets_fileinfo(length, hashes)
     self.assertEqual(fileinfo, download_fileinfo)
 
     # Test that the TUF client does not download large metadata files, as well.
@@ -291,4 +277,5 @@ class TestEndlessDataAttack(unittest_toolbox.Modified_TestCase):
 
 
 if __name__ == '__main__':
+  utils.configure_test_logging(sys.argv)
   unittest.main()

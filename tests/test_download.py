@@ -36,11 +36,10 @@ from __future__ import unicode_literals
 import hashlib
 import logging
 import os
-import random
-import subprocess
 import sys
-import time
 import unittest
+import urllib3
+import warnings
 
 import tuf
 import tuf.download as download
@@ -48,12 +47,13 @@ import tuf.log
 import tuf.unittest_toolbox as unittest_toolbox
 import tuf.exceptions
 
+from tests import utils
+
 import requests.exceptions
 
 import securesystemslib
-import six
 
-logger = logging.getLogger('tuf.test_download')
+logger = logging.getLogger(__name__)
 
 
 class TestDownload(unittest_toolbox.Modified_TestCase):
@@ -73,21 +73,11 @@ class TestDownload(unittest_toolbox.Modified_TestCase):
     self.target_data_length = len(self.target_data)
 
     # Launch a SimpleHTTPServer (serves files in the current dir).
-    self.PORT = random.randint(30000, 45000)
-    self.server_proc = popen_python(['simple_server.py', str(self.PORT)])
-    logger.info('\n\tServer process started.')
-    logger.info('\tServer process id: '+str(self.server_proc.pid))
-    logger.info('\tServing on port: '+str(self.PORT))
-    junk, rel_target_filepath = os.path.split(target_filepath)
-    self.url = 'http://localhost:'+str(self.PORT)+'/'+rel_target_filepath
+    self.server_process_handler = utils.TestServerProcess(log=logger)
 
-    # Provide a delay long enough to allow the HTTPS servers to start.
-    # Encountered an error on one test system at delay value of 0.2s, so
-    # increasing to 0.5s.  Further increasing to 2s due to occasional failures
-    # in other tests in similar circumstances on AppVeyor.
-    # Expect to see "Connection refused" if this delay is not long enough
-    # (though other issues could cause that).
-    time.sleep(2)
+    rel_target_filepath = os.path.basename(target_filepath)
+    self.url = 'http://localhost:' \
+        + str(self.server_process_handler.port) + '/' + rel_target_filepath
 
     # Computing hash of target file data.
     m = hashlib.md5()
@@ -99,9 +89,10 @@ class TestDownload(unittest_toolbox.Modified_TestCase):
   # Stop server process and perform clean up.
   def tearDown(self):
     unittest_toolbox.Modified_TestCase.tearDown(self)
-    if self.server_proc.returncode is None:
-      logger.info('\tServer process '+str(self.server_proc.pid)+' terminated.')
-      self.server_proc.kill()
+
+    # Cleans the resources and flush the logged lines (if any).
+    self.server_process_handler.clean()
+
     self.target_fileobj.close()
 
 
@@ -109,11 +100,11 @@ class TestDownload(unittest_toolbox.Modified_TestCase):
   def test_download_url_to_tempfileobj(self):
 
     download_file = download.safe_download
-
-    temp_fileobj = download_file(self.url, self.target_data_length)
-    self.assertEqual(self.target_data, temp_fileobj.read().decode('utf-8'))
-    self.assertEqual(self.target_data_length, len(temp_fileobj.read()))
-    temp_fileobj.close_temp_file()
+    with download_file(self.url, self.target_data_length) as temp_fileobj:
+      temp_fileobj.seek(0)
+      temp_file_data = temp_fileobj.read().decode('utf-8')
+      self.assertEqual(self.target_data, temp_file_data)
+      self.assertEqual(self.target_data_length, len(temp_file_data))
 
 
 
@@ -127,8 +118,8 @@ class TestDownload(unittest_toolbox.Modified_TestCase):
     # the server-reported length of the file does not match the
     # required_length.  'updater.py' *does* verify the hashes of downloaded
     # content.
-    download.safe_download(self.url, self.target_data_length - 4)
-    download.unsafe_download(self.url, self.target_data_length - 4)
+    download.safe_download(self.url, self.target_data_length - 4).close()
+    download.unsafe_download(self.url, self.target_data_length - 4).close()
 
     # We catch 'tuf.exceptions.DownloadLengthMismatchError' for safe_download()
     # because it will not download more bytes than requested (in this case, a
@@ -138,7 +129,7 @@ class TestDownload(unittest_toolbox.Modified_TestCase):
 
     # Calling unsafe_download() with a mismatched length should not raise an
     # exception.
-    download.unsafe_download(self.url, self.target_data_length + 1)
+    download.unsafe_download(self.url, self.target_data_length + 1).close()
 
 
 
@@ -158,7 +149,7 @@ class TestDownload(unittest_toolbox.Modified_TestCase):
 
     self.assertEqual(self.target_data, temp_fileobj.read())
     self.assertEqual(self.target_data_length, len(temp_fileobj.read()))
-    temp_fileobj.close_temp_file()
+    temp_fileobj.close()
 
     print "Performance cpu time: "+str(end_cpu - star_cpu)
     print "Performance real time: "+str(end_real - star_real)
@@ -180,14 +171,17 @@ class TestDownload(unittest_toolbox.Modified_TestCase):
                       download_file,
                       self.random_string(), self.target_data_length)
 
+    url = 'http://localhost:' \
+        + str(self.server_process_handler.port) + '/' + self.random_string()
     self.assertRaises(requests.exceptions.HTTPError,
                       download_file,
-                      'http://localhost:' + str(self.PORT) + '/' + self.random_string(),
+                      url,
                       self.target_data_length)
-
+    url1 = 'http://localhost:' \
+      + str(self.server_process_handler.port + 1) + '/' + self.random_string()
     self.assertRaises(requests.exceptions.ConnectionError,
                       download_file,
-                      'http://localhost:' + str(self.PORT+1) + '/' + self.random_string(),
+                      url1,
                       self.target_data_length)
 
     # Specify an unsupported URI scheme.
@@ -262,31 +256,30 @@ class TestDownload(unittest_toolbox.Modified_TestCase):
     # 3: run with an HTTPS certificate with an unexpected hostname
     # 4: run with an HTTPS certificate that is expired
     # Be sure to offset from the port used in setUp to avoid collision.
-    port1 = str(self.PORT + 1)
-    port2 = str(self.PORT + 2)
-    port3 = str(self.PORT + 3)
-    port4 = str(self.PORT + 4)
-    good_https_server_proc = popen_python(
-        ['simple_https_server.py', port1, good_cert_fname])
-    good2_https_server_proc = popen_python(
-        ['simple_https_server.py', port2, good2_cert_fname])
-    bad_https_server_proc = popen_python(
-        ['simple_https_server.py', port3, bad_cert_fname])
-    expd_https_server_proc = popen_python(
-        ['simple_https_server.py', port4, expired_cert_fname])
 
-    # Provide a delay long enough to allow the four HTTPS servers to start.
-    # Have encountered errors at 0.2s, 0.5s, and 2s, primarily on AppVeyor.
-    # Increasing to 4s for this test.
-    # Expect to see "Connection refused" if this delay is not long enough
-    # (though other issues could cause that).
-    time.sleep(3)
 
-    relative_target_fpath = os.path.basename(target_filepath)
-    good_https_url = 'https://localhost:' + port1 + '/' + relative_target_fpath
-    good2_https_url = good_https_url.replace(':' + port1, ':' + port2)
-    bad_https_url = good_https_url.replace(':' + port1, ':' + port3)
-    expired_https_url = good_https_url.replace(':' + port1, ':' + port4)
+    good_https_server_handler = utils.TestServerProcess(log=logger,
+        server='simple_https_server.py',
+        extra_cmd_args=[good_cert_fname])
+    good2_https_server_handler = utils.TestServerProcess(log=logger,
+        server='simple_https_server.py',
+        extra_cmd_args=[good2_cert_fname])
+    bad_https_server_handler = utils.TestServerProcess(log=logger,
+        server='simple_https_server.py',
+        extra_cmd_args=[bad_cert_fname])
+    expd_https_server_handler = utils.TestServerProcess(log=logger,
+        server='simple_https_server.py',
+        extra_cmd_args=[expired_cert_fname])
+
+    suffix = '/' +  os.path.basename(target_filepath)
+    good_https_url = 'https://localhost:' \
+        + str(good_https_server_handler.port) + suffix
+    good2_https_url = 'https://localhost:' \
+        + str(good2_https_server_handler.port) + suffix
+    bad_https_url = 'https://localhost:' \
+        + str(bad_https_server_handler.port) + suffix
+    expired_https_url = 'https://localhost:' \
+        + str(expd_https_server_handler.port) + suffix
 
     # Download the target file using an HTTPS connection.
 
@@ -303,105 +296,82 @@ class TestDownload(unittest_toolbox.Modified_TestCase):
       # the bad cert. Expect failure because even though we trust it, the
       # hostname we're connecting to does not match the hostname in the cert.
       logger.info('Trying HTTPS download of target file: ' + bad_https_url)
-      with self.assertRaises(requests.exceptions.SSLError):
-        download.safe_download(bad_https_url, target_data_length)
-      with self.assertRaises(requests.exceptions.SSLError):
-        download.unsafe_download(bad_https_url, target_data_length)
+      with warnings.catch_warnings():
+        # We're ok with a slightly fishy localhost cert
+        warnings.filterwarnings('ignore',
+            category=urllib3.exceptions.SubjectAltNameWarning)
 
-      # Try connecting to the server processes with the good certs while not
-      # trusting the good certs (trusting the bad cert instead). Expect failure
-      # because even though the server's cert file is otherwise OK, we don't
-      # trust it.
-      print('Trying HTTPS download of target file: ' + good_https_url)
-      with self.assertRaises(requests.exceptions.SSLError):
-        download.safe_download(good_https_url, target_data_length)
-      with self.assertRaises(requests.exceptions.SSLError):
-        download.unsafe_download(good_https_url, target_data_length)
+        with self.assertRaises(requests.exceptions.SSLError):
+          download.safe_download(bad_https_url, target_data_length)
+        with self.assertRaises(requests.exceptions.SSLError):
+          download.unsafe_download(bad_https_url, target_data_length)
 
-      print('Trying HTTPS download of target file: ' + good2_https_url)
-      with self.assertRaises(requests.exceptions.SSLError):
-        download.safe_download(good2_https_url, target_data_length)
-      with self.assertRaises(requests.exceptions.SSLError):
-        download.unsafe_download(good2_https_url, target_data_length)
+        # Try connecting to the server processes with the good certs while not
+        # trusting the good certs (trusting the bad cert instead). Expect failure
+        # because even though the server's cert file is otherwise OK, we don't
+        # trust it.
+        logger.info('Trying HTTPS download of target file: ' + good_https_url)
+        with self.assertRaises(requests.exceptions.SSLError):
+          download.safe_download(good_https_url, target_data_length)
+        with self.assertRaises(requests.exceptions.SSLError):
+          download.unsafe_download(good_https_url, target_data_length)
 
-
-      # Configure environment to now trust the certfile that is expired.
-      os.environ['REQUESTS_CA_BUNDLE'] = expired_cert_fname
-      # Clear sessions to ensure that the certificate we just specified is used.
-      # TODO: Confirm necessity of this session clearing and lay out mechanics.
-      tuf.download._sessions = {}
-
-      # Try connecting to the server process with the expired cert while
-      # trusting the expired cert. Expect failure because even though we trust
-      # it, it is expired.
-      logger.info('Trying HTTPS download of target file: ' + expired_https_url)
-      with self.assertRaises(requests.exceptions.SSLError):
-        download.safe_download(expired_https_url, target_data_length)
-      with self.assertRaises(requests.exceptions.SSLError):
-        download.unsafe_download(expired_https_url, target_data_length)
+        logger.info('Trying HTTPS download of target file: ' + good2_https_url)
+        with self.assertRaises(requests.exceptions.SSLError):
+          download.safe_download(good2_https_url, target_data_length)
+        with self.assertRaises(requests.exceptions.SSLError):
+          download.unsafe_download(good2_https_url, target_data_length)
 
 
-      # Try connecting to the server processes with the good certs while
-      # trusting the appropriate good certs. Expect success.
-      # TODO: expand testing to switch expected certificates back and forth a
-      #       bit more while clearing / not clearing sessions.
-      os.environ['REQUESTS_CA_BUNDLE'] = good_cert_fname
-      # Clear sessions to ensure that the certificate we just specified is used.
-      # TODO: Confirm necessity of this session clearing and lay out mechanics.
-      tuf.download._sessions = {}
-      logger.info('Trying HTTPS download of target file: ' + good_https_url)
-      download.safe_download(good_https_url, target_data_length)
-      download.unsafe_download(good_https_url, target_data_length)
+        # Configure environment to now trust the certfile that is expired.
+        os.environ['REQUESTS_CA_BUNDLE'] = expired_cert_fname
+        # Clear sessions to ensure that the certificate we just specified is used.
+        # TODO: Confirm necessity of this session clearing and lay out mechanics.
+        tuf.download._sessions = {}
 
-      os.environ['REQUESTS_CA_BUNDLE'] = good2_cert_fname
-      # Clear sessions to ensure that the certificate we just specified is used.
-      # TODO: Confirm necessity of this session clearing and lay out mechanics.
-      tuf.download._sessions = {}
-      logger.info('Trying HTTPS download of target file: ' + good2_https_url)
-      download.safe_download(good2_https_url, target_data_length)
-      download.unsafe_download(good2_https_url, target_data_length)
+        # Try connecting to the server process with the expired cert while
+        # trusting the expired cert. Expect failure because even though we trust
+        # it, it is expired.
+        logger.info('Trying HTTPS download of target file: ' + expired_https_url)
+        with self.assertRaises(requests.exceptions.SSLError):
+          download.safe_download(expired_https_url, target_data_length)
+        with self.assertRaises(requests.exceptions.SSLError):
+          download.unsafe_download(expired_https_url, target_data_length)
+
+
+        # Try connecting to the server processes with the good certs while
+        # trusting the appropriate good certs. Expect success.
+        # TODO: expand testing to switch expected certificates back and forth a
+        #       bit more while clearing / not clearing sessions.
+        os.environ['REQUESTS_CA_BUNDLE'] = good_cert_fname
+        # Clear sessions to ensure that the certificate we just specified is used.
+        # TODO: Confirm necessity of this session clearing and lay out mechanics.
+        tuf.download._sessions = {}
+        logger.info('Trying HTTPS download of target file: ' + good_https_url)
+        download.safe_download(good_https_url, target_data_length).close()
+        download.unsafe_download(good_https_url, target_data_length).close()
+
+        os.environ['REQUESTS_CA_BUNDLE'] = good2_cert_fname
+        # Clear sessions to ensure that the certificate we just specified is used.
+        # TODO: Confirm necessity of this session clearing and lay out mechanics.
+        tuf.download._sessions = {}
+        logger.info('Trying HTTPS download of target file: ' + good2_https_url)
+        download.safe_download(good2_https_url, target_data_length).close()
+        download.unsafe_download(good2_https_url, target_data_length).close()
 
     finally:
-      for proc in [
-          good_https_server_proc,
-          good2_https_server_proc,
-          bad_https_server_proc,
-          expd_https_server_proc]:
-        if proc.returncode is None:
-          logger.info('Terminating server process ' + str(proc.pid))
-          proc.kill()
+      for proc_handler in [
+          good_https_server_handler,
+          good2_https_server_handler,
+          bad_https_server_handler,
+          expd_https_server_handler]:
 
-
-
-
-
-  def test__get_content_length(self):
-    content_length = \
-      tuf.download._get_content_length({'bad_connection_object': 8})
-    self.assertEqual(content_length, None)
-
-
-
-
-
-# TODO: Move this to a common test module (tests/common.py?)
-#       and strip it test_proxy_use.py and test_download.py.
-def popen_python(command_arg_list):
-  """
-  Run subprocess.Popen() to produce a process running a Python interpreter.
-  Uses the same Python interpreter that the current process is using, via
-  sys.executable.
-  """
-  assert sys.executable, 'Test cannot function: unable to determine ' \
-      'current Python interpreter via sys.executable.'
-
-  return subprocess.Popen(
-      [sys.executable] + command_arg_list, stderr=subprocess.PIPE)
-
-
+        # Cleans the resources and flush the logged lines (if any).
+        proc_handler.clean()
 
 
 
 # Run unit test.
 if __name__ == '__main__':
+  utils.configure_test_logging(sys.argv)
   unittest.main()

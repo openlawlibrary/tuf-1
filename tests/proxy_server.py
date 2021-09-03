@@ -93,7 +93,7 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
     def handle_error(self, request, client_address):
-        # surpress socket/ssl related errors
+        # suppress socket/ssl related errors
         cls, e = sys.exc_info()[:2]
         if cls is socket.error or cls is ssl.SSLError:
             pass
@@ -115,7 +115,7 @@ class ProxyRequestHandler(BaseHTTPRequestHandler):
         BaseHTTPRequestHandler.__init__(self, *args, **kwargs)
 
     def log_error(self, format, *args):
-        # surpress "Request timed out: timeout('timed out',)"
+        # suppress "Request timed out: timeout('timed out',)"
         if isinstance(args[0], socket.timeout):
             return
 
@@ -462,25 +462,21 @@ def test(HandlerClass=ProxyRequestHandler, ServerClass=ThreadingHTTPServer, prot
     global INTERCEPT
     global TARGET_SERVER_CA_FILEPATH
 
-    if sys.argv[1:]:
-        port = int(sys.argv[1])
-    else:
-        port = 8080
-    server_address = ('127.0.0.1', port) # MODIFIED: changed from '::1'
+    server_address = ('localhost', 0)
 
     # MODIFIED: Argument added, conditional below added to control INTERCEPT
     # setting.
-    if len(sys.argv) > 2:
-      if sys.argv[2].lower() == 'intercept':
+    if len(sys.argv) > 1:
+      if sys.argv[1].lower() == 'intercept':
         INTERCEPT = True
 
     # MODIFIED: Argument added to control certificate(s) the proxy expects of
     # the target server(s), and added default value.
-    if len(sys.argv) > 3:
-      if os.path.exists(sys.argv[3]):
-        TARGET_SERVER_CA_FILEPATH = sys.argv[3]
+    if len(sys.argv) > 2:
+      if os.path.exists(sys.argv[2]):
+        TARGET_SERVER_CA_FILEPATH = sys.argv[2]
       else:
-        raise Exception('Target server cert file not found: ' + sys.argv[3])
+        raise Exception('Target server cert file not found: ' + sys.argv[2])
 
     # MODIFIED: Create the target-host-specific proxy certificates directory if
     # it doesn't already exist.
@@ -490,10 +486,12 @@ def test(HandlerClass=ProxyRequestHandler, ServerClass=ThreadingHTTPServer, prot
 
     HandlerClass.protocol_version = protocol
     httpd = ServerClass(server_address, HandlerClass)
-
     sa = httpd.socket.getsockname()
-    print "Serving HTTP Proxy on", sa[0], "port", sa[1], "..."
+    port_message = 'bind succeeded, server port is: ' + str(sa[1])
+    print(port_message)
+    print("Serving HTTP Proxy on", sa[0], "port", sa[1], "...")
     httpd.serve_forever()
+
 
 
 if __name__ == '__main__':

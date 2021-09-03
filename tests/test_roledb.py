@@ -30,6 +30,7 @@ from __future__ import unicode_literals
 
 import unittest
 import logging
+import sys
 
 import tuf
 import tuf.formats
@@ -37,10 +38,12 @@ import tuf.roledb
 import tuf.exceptions
 import tuf.log
 
+from tests import utils
+
 import securesystemslib
 import securesystemslib.keys
 
-logger = logging.getLogger('tuf.test_roledb')
+logger = logging.getLogger(__name__)
 
 
 # Generate the three keys to use in our test cases.
@@ -546,8 +549,16 @@ class TestRoledb(unittest.TestCase):
     consistent_snapshot = False
     expires = '1985-10-21T01:21:00Z'
 
-    root_metadata = tuf.formats.RootFile.make_metadata(version,
-        expires, keydict, roledict, consistent_snapshot)
+    root_metadata = tuf.formats.build_dict_conforming_to_schema(
+        tuf.formats.ROOT_SCHEMA,
+        _type='root',
+        spec_version='1.0.0',
+        version=version,
+        expires=expires,
+        keys=keydict,
+        roles=roledict,
+        consistent_snapshot=consistent_snapshot)
+
     self.assertEqual(None,
                      tuf.roledb.create_roledb_from_root_metadata(root_metadata))
 
@@ -592,8 +603,17 @@ class TestRoledb(unittest.TestCase):
 
     # Generate 'root_metadata' to verify that 'release' and 'root' are added
     # to the role database.
-    root_metadata = tuf.formats.RootFile.make_metadata(version,
-        expires, keydict, roledict, consistent_snapshot)
+
+    root_metadata = tuf.formats.build_dict_conforming_to_schema(
+        tuf.formats.ROOT_SCHEMA,
+        _type='root',
+        spec_version='1.0.0',
+        version=version,
+        expires=expires,
+        keys=keydict,
+        roles=roledict,
+        consistent_snapshot=consistent_snapshot)
+
     self.assertEqual(None,
         tuf.roledb.create_roledb_from_root_metadata(root_metadata))
 
@@ -693,7 +713,7 @@ class TestRoledb(unittest.TestCase):
     self.assertEqual([rolename], tuf.roledb.get_dirty_roles())
 
     tuf.roledb.mark_dirty(['dirty_role'])
-    self.assertEqual([rolename2, rolename], sorted(tuf.roledb.get_dirty_roles()))
+    self.assertEqual([rolename2, rolename], tuf.roledb.get_dirty_roles())
 
     # Verify that a role cannot be marked as dirty for a non-existent
     # repository.
@@ -718,9 +738,9 @@ class TestRoledb(unittest.TestCase):
     tuf.roledb.update_roleinfo(rolename2, roleinfo2, mark_role_as_dirty)
 
     tuf.roledb.unmark_dirty(['dirty_role'])
-    self.assertEqual([rolename], sorted(tuf.roledb.get_dirty_roles()))
+    self.assertEqual([rolename], tuf.roledb.get_dirty_roles())
     tuf.roledb.unmark_dirty(['targets'])
-    self.assertEqual([], sorted(tuf.roledb.get_dirty_roles()))
+    self.assertEqual([], tuf.roledb.get_dirty_roles())
 
     # What happens for a role that isn't dirty?  unmark_dirty() should just
     # log a message.
@@ -771,4 +791,5 @@ def tearDownModule():
 
 # Run the unit tests.
 if __name__ == '__main__':
+  utils.configure_test_logging(sys.argv)
   unittest.main()

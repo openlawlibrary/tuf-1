@@ -30,29 +30,27 @@ from __future__ import division
 from __future__ import unicode_literals
 
 import os
-import sys
 import tempfile
-import random
-import subprocess
 import logging
-import time
 import shutil
 import unittest
 import json
+import sys
 
 import tuf
 import tuf.log
 import tuf.roledb
 import tuf.client.updater as updater
 import tuf.settings
-import securesystemslib
 import tuf.unittest_toolbox as unittest_toolbox
 import tuf.repository_tool as repo_tool
+
+from tests import utils
 
 import six
 import securesystemslib
 
-logger = logging.getLogger('test_multiple_repositories_integration')
+logger = logging.getLogger(__name__)
 
 repo_tool.disable_console_log_messages()
 
@@ -120,54 +118,34 @@ class TestMultipleRepositoriesIntegration(unittest_toolbox.Modified_TestCase):
     # the pre-generated metadata files have a specific structure, such
     # as a delegated role 'targets/role1', three target files, five key files,
     # etc.
-    self.SERVER_PORT = random.SystemRandom().randint(30000, 45000)
-    self.SERVER_PORT2 = random.SystemRandom().randint(30000, 45000)
 
-    # Avoid duplicate port numbers, to prevent multiple localhosts from
-    # listening on the same port.
-    while self.SERVER_PORT == self.SERVER_PORT2:
-      self.SERVER_PORT2 = random.SystemRandom().randint(30000, 45000)
+    # Needed because in some tests simple_server.py cannot be found.
+    # The reason is that the current working directory
+    # has been changed when executing a subprocess.
+    SIMPLE_SERVER_PATH = os.path.join(os.getcwd(), 'simple_server.py')
 
-    command = ['python', '-m', 'tuf.scripts.simple_server', str(self.SERVER_PORT)]
-    command2 = ['python', '-m', 'tuf.scripts.simple_server', str(self.SERVER_PORT2)]
-
-    self.server_process = subprocess.Popen(command, stderr=subprocess.PIPE,
-        cwd=self.repository_directory)
+    # Creates a subprocess running a server.
+    self.server_process_handler = utils.TestServerProcess(log=logger,
+        server=SIMPLE_SERVER_PATH, popen_cwd=self.repository_directory)
 
     logger.debug('Server process started.')
-    logger.debug('Server process id: ' + str(self.server_process.pid))
-    logger.debug('Serving on port: ' + str(self.SERVER_PORT))
 
-    self.server_process2 = subprocess.Popen(command2, stderr=subprocess.PIPE,
-        cwd=self.repository_directory2)
-
+    # Creates a subprocess running a server.
+    self.server_process_handler2 = utils.TestServerProcess(log=logger,
+        server=SIMPLE_SERVER_PATH, popen_cwd=self.repository_directory2)
 
     logger.debug('Server process 2 started.')
-    logger.debug('Server 2 process id: ' + str(self.server_process2.pid))
-    logger.debug('Serving 2 on port: ' + str(self.SERVER_PORT2))
-    self.url = 'http://localhost:' + str(self.SERVER_PORT) + os.path.sep
-    self.url2 = 'http://localhost:' + str(self.SERVER_PORT2) + os.path.sep
 
-    # NOTE: Following error is raised if a delay is not long enough:
-    # <urlopen error [Errno 111] Connection refused>
-    # or, on Windows:
-    # Failed to establish a new connection: [Errno 111] Connection refused'
-    # 0.3s led to occasional failures in automated builds, primarily on
-    # AppVeyor, so increasing this to 2s, sadly.
-    time.sleep(2)
-
-    url_prefix = 'http://localhost:' + str(self.SERVER_PORT)
-    url_prefix2 = 'http://localhost:' + str(self.SERVER_PORT2)
+    url_prefix = 'http://localhost:' + str(self.server_process_handler.port)
+    url_prefix2 = 'http://localhost:' + str(self.server_process_handler2.port)
 
     self.repository_mirrors = {'mirror1': {'url_prefix': url_prefix,
                                            'metadata_path': 'metadata',
-                                           'targets_path': 'targets',
-                                           'confined_target_dirs': ['']}}
+                                           'targets_path': 'targets'}}
 
     self.repository_mirrors2 = {'mirror1': {'url_prefix': url_prefix2,
                                            'metadata_path': 'metadata',
-                                           'targets_path': 'targets',
-                                           'confined_target_dirs': ['']}}
+                                           'targets_path': 'targets'}}
 
     # Create the repository instances.  The test cases will use these client
     # updaters to refresh metadata, fetch target files, etc.
@@ -182,25 +160,15 @@ class TestMultipleRepositoriesIntegration(unittest_toolbox.Modified_TestCase):
     # directories that may have been created during each test case.
     unittest_toolbox.Modified_TestCase.tearDown(self)
 
-    # Kill the SimpleHTTPServer process.
-    if self.server_process.returncode is None:
-      logger.info('Server process ' + str(self.server_process.pid) + ' terminated.')
-      self.server_process.kill()
-
-    if self.server_process2.returncode is None:
-      logger.info('Server 2 process ' + str(self.server_process2.pid) + ' terminated.')
-      self.server_process2.kill()
+    # Cleans the resources and flush the logged lines (if any).
+    self.server_process_handler.clean()
+    self.server_process_handler2.clean()
 
     # updater.Updater() populates the roledb with the name "test_repository1"
     tuf.roledb.clear_roledb(clear_all=True)
     tuf.keydb.clear_keydb(clear_all=True)
 
-    # Remove the temporary repository directory, which should contain all the
-    # metadata, targets, and key files generated of all the test cases.
-    # sleep for a bit to allow the kill'd server processes to terminate.
-    time.sleep(.3)
     shutil.rmtree(self.temporary_directory)
-
 
 
   def test_update(self):
@@ -286,8 +254,10 @@ class TestMultipleRepositoriesIntegration(unittest_toolbox.Modified_TestCase):
 
     # Test the behavior of the multi-repository updater.
     map_file = securesystemslib.util.load_json_file(self.map_file)
-    map_file['repositories'][self.repository_name] = ['http://localhost:' + str(self.SERVER_PORT)]
-    map_file['repositories'][self.repository_name2] = ['http://localhost:' + str(self.SERVER_PORT2)]
+    map_file['repositories'][self.repository_name] = ['http://localhost:' \
+        + str(self.server_process_handler.port)]
+    map_file['repositories'][self.repository_name2] = ['http://localhost:' \
+        + str(self.server_process_handler2.port)]
     with open(self.map_file, 'w') as file_object:
       file_object.write(json.dumps(map_file))
 
@@ -304,4 +274,5 @@ class TestMultipleRepositoriesIntegration(unittest_toolbox.Modified_TestCase):
 
 
 if __name__ == '__main__':
+  utils.configure_test_logging(sys.argv)
   unittest.main()

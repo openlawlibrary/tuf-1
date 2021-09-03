@@ -20,7 +20,7 @@
   Provide a set of pre-generated key files and a basic repository that unit
   tests can use in their test cases.  The pre-generated files created by this
   script should be copied by the unit tests as needed.  The original versions
-  should be preserved.  'tuf/tests/unit/repository_files/' will store the files
+  should be preserved.  'tuf/tests/repository_data/' will store the files
   generated.  'generate.py' should not require re-execution if the
   pre-generated repository files have already been created, unless they need to
   change in some way.
@@ -59,11 +59,11 @@ if options.should_generate_keys and not options.dry_run:
   # Generate public and private key files for the top-level roles, and two
   # delegated roles (these number of keys should be sufficient for most of the
   # unit tests).  Unit tests may generate additional keys, if needed.
-  generate_and_write_rsa_keypair(root_key_file, password='password')
-  generate_and_write_ed25519_keypair(targets_key_file, password='password')
-  generate_and_write_ed25519_keypair(snapshot_key_file, password='password')
-  generate_and_write_ed25519_keypair(timestamp_key_file, password='password')
-  generate_and_write_ed25519_keypair(delegation_key_file, password='password')
+  generate_and_write_rsa_keypair(password='password', filepath=root_key_file)
+  generate_and_write_ed25519_keypair(password='password', filepath=targets_key_file)
+  generate_and_write_ed25519_keypair(password='password', filepath=snapshot_key_file)
+  generate_and_write_ed25519_keypair(password='password', filepath=timestamp_key_file)
+  generate_and_write_ed25519_keypair(password='password', filepath=delegation_key_file)
 
 # Import the public keys.  These keys are needed so that metadata roles are
 # assigned verification keys, which clients use to verify the signatures created
@@ -107,6 +107,11 @@ securesystemslib.util.ensure_parent_dir(target2_filepath)
 if not options.dry_run:
   with open(target1_filepath, 'wt') as file_object:
     file_object.write('This is an example target file.')
+  # As we will add this file's permissions to the custom_attribute in the
+  # target's metadata we need to ensure that the file has the same
+  # permissions when created by this script regardless of umask value on
+  # the host system generating the data
+  os.chmod(target1_filepath, 0o644)
 
   with open(target2_filepath, 'wt') as file_object:
     file_object.write('This is an another example target file.')
@@ -119,12 +124,12 @@ if not options.dry_run:
 # about the target (i.e., file permissions in octal format.)
 octal_file_permissions = oct(os.stat(target1_filepath).st_mode)[4:]
 file_permissions = {'file_permissions': octal_file_permissions}
-repository.targets.add_target(target1_filepath, file_permissions)
-repository.targets.add_target(target2_filepath)
+repository.targets.add_target(os.path.basename(target1_filepath), file_permissions)
+repository.targets.add_target(os.path.basename(target2_filepath))
 
 repository.targets.delegate('role1', [delegation_public],
     [os.path.basename(target3_filepath)])
-repository.targets('role1').add_target(target3_filepath)
+repository.targets('role1').add_target(os.path.basename(target3_filepath))
 repository.targets('role1').load_signing_key(delegation_private)
 
 repository.targets('role1').delegate('role2', [delegation_public], [])
@@ -153,6 +158,6 @@ if not options.dry_run:
   shutil.copytree(staged_metadata_directory, metadata_directory)
 
 # Create the client files (required directory structure and minimal metadata)
-# required by the 'tuf.interposition' and 'tuf.client.updater.py' updaters.
+# as expected by 'tuf.client.updater'.
 if not options.dry_run:
   create_tuf_client_directory('repository', os.path.join('client', 'test_repository1'))

@@ -53,17 +53,44 @@ import securesystemslib.keys
 
 import six
 
-# These imports provide the interface for 'developer_tool.py', since the
-# imports are made there.
-from securesystemslib.keys import format_keyval_to_metadata
-
 from tuf.repository_tool import Targets
 from tuf.repository_lib import _check_role_keys
-from tuf.repository_lib import generate_targets_metadata
 from tuf.repository_lib import _metadata_is_partially_loaded
 
+
+# Copy API
+# pylint: disable=unused-import
+
+# Copy generic repository API functions to be used via `developer_tool`
+from tuf.repository_lib import (
+    generate_targets_metadata,
+    create_tuf_client_directory,
+    disable_console_log_messages)
+
+# Copy key-related API functions to be used via `developer_tool`
+from tuf.repository_lib import (
+    import_rsa_privatekey_from_file)
+
+from securesystemslib.keys import (
+    format_keyval_to_metadata)
+
+from securesystemslib.interface import (
+    generate_and_write_rsa_keypair,
+    generate_and_write_rsa_keypair_with_prompt,
+    generate_and_write_unencrypted_rsa_keypair,
+    generate_and_write_ecdsa_keypair,
+    generate_and_write_ecdsa_keypair_with_prompt,
+    generate_and_write_unencrypted_ecdsa_keypair,
+    generate_and_write_ed25519_keypair,
+    generate_and_write_ed25519_keypair_with_prompt,
+    generate_and_write_unencrypted_ed25519_keypair,
+    import_rsa_publickey_from_file,
+    import_ed25519_publickey_from_file,
+    import_ed25519_privatekey_from_file)
+
+
 # See 'log.py' to learn how logging is handled in TUF.
-logger = logging.getLogger('tuf.developer_tool')
+logger = logging.getLogger(__name__)
 
 # The extension of TUF metadata.
 from tuf.repository_lib import METADATA_EXTENSION as METADATA_EXTENSION
@@ -170,7 +197,7 @@ class Project(Targets):
     securesystemslib.formats.NAME_SCHEMA.check_match(project_name)
     securesystemslib.formats.PATH_SCHEMA.check_match(metadata_directory)
     securesystemslib.formats.PATH_SCHEMA.check_match(targets_directory)
-    securesystemslib.formats.PATH_SCHEMA.check_match(file_prefix)
+    securesystemslib.formats.ANY_STRING_SCHEMA.check_match(file_prefix)
     securesystemslib.formats.NAME_SCHEMA.check_match(repository_name)
 
     self.metadata_directory = metadata_directory
@@ -351,7 +378,7 @@ class Project(Targets):
         try:
           _check_role_keys(delegated_role, self.repository_name)
 
-        except securesystemslib.exceptions.InsufficientKeysError:
+        except tuf.exceptions.InsufficientKeysError:
           insufficient_keys.append(delegated_role)
           continue
 
@@ -380,7 +407,7 @@ class Project(Targets):
       try:
         _check_role_keys(self.rolename, self.repository_name)
 
-      except securesystemslib.exceptions.InsufficientKeysError as e:
+      except tuf.exceptions.InsufficientKeysError as e:
         logger.info(str(e))
         return
 
@@ -390,10 +417,10 @@ class Project(Targets):
             self.repository_name)
         self._log_status(self.project_name, signable, self.repository_name)
 
-      except securesystemslib.exceptions.Error as e:
-        # pylint: disable=unsubscriptable-object
-        signable = e[1]
-        self._log_status(self.project_name, signable, self.repository_name)
+      except tuf.exceptions.UnsignedMetadataError as e:
+        # This error is raised if the metadata has insufficient signatures to
+        # meet the threshold.
+        self._log_status(self.project_name, e.signable, self.repository_name)
         return
 
     finally:
@@ -481,8 +508,9 @@ def _generate_and_write_metadata(rolename, metadata_filename, write_partial,
 
   if tuf.sig.verify(signable, rolename, repository_name) or write_partial:
     repo_lib._remove_invalid_and_duplicate_signatures(signable, repository_name)
+    storage_backend = securesystemslib.storage.FilesystemBackend()
     filename = repo_lib.write_metadata_file(signable, metadata_filename,
-        metadata['version'], False)
+        metadata['version'], False, storage_backend)
 
   # 'signable' contains an invalid threshold of signatures.
   else:
@@ -519,7 +547,7 @@ def create_new_project(project_name, metadata_directory,
 
     location_in_repository:
       An optional argument to hold the "prefix" or the expected location for
-      the project files in the "upstream" respository. This value is only
+      the project files in the "upstream" repository. This value is only
       used to sign metadata in a way that it matches the future location
       of the files.
 
@@ -563,7 +591,7 @@ def create_new_project(project_name, metadata_directory,
   # Do the same for the location in the repo and the project name, we must
   # ensure they are valid pathnames.
   securesystemslib.formats.NAME_SCHEMA.check_match(project_name)
-  securesystemslib.formats.PATH_SCHEMA.check_match(location_in_repository)
+  securesystemslib.formats.ANY_STRING_SCHEMA.check_match(location_in_repository)
   securesystemslib.formats.NAME_SCHEMA.check_match(repository_name)
 
   # for the targets directory we do the same, but first, let's find out what
@@ -694,7 +722,7 @@ def _save_project_configuration(metadata_directory, targets_directory,
   securesystemslib.formats.PATH_SCHEMA.check_match(metadata_directory)
   securesystemslib.formats.PATH_SCHEMA.check_match(prefix)
   securesystemslib.formats.PATH_SCHEMA.check_match(targets_directory)
-  securesystemslib.formats.RELPATH_SCHEMA.check_match(project_name)
+  tuf.formats.RELPATH_SCHEMA.check_match(project_name)
 
   cfg_file_directory = metadata_directory
 
@@ -776,7 +804,7 @@ def load_project(project_directory, prefix='', new_targets_location=None,
   securesystemslib.formats.NAME_SCHEMA.check_match(repository_name)
 
   # Do the same for the prefix
-  securesystemslib.formats.PATH_SCHEMA.check_match(prefix)
+  securesystemslib.formats.ANY_STRING_SCHEMA.check_match(prefix)
 
   # Clear the role and key databases since we are loading in a new project.
   tuf.roledb.clear_roledb(clear_all=True)
@@ -834,7 +862,12 @@ def load_project(project_directory, prefix='', new_targets_location=None,
   targets_metadata_path = os.path.join(project_directory, metadata_directory,
       project_filename)
   signable = securesystemslib.util.load_json_file(targets_metadata_path)
-  tuf.formats.check_signable_object_format(signable)
+  try:
+    tuf.formats.check_signable_object_format(signable)
+  except tuf.exceptions.UnsignedMetadataError:
+    # Downgrade the error to a warning because a use case exists where
+    # metadata may be generated unsigned on one machine and signed on another.
+    logger.warning('Unsigned metadata object: ' + repr(signable))
   targets_metadata = signable['signed']
 
   # Remove the prefix from the metadata.
@@ -944,7 +977,7 @@ def load_project(project_directory, prefix='', new_targets_location=None,
         try:
           tuf.keydb.add_key(key_object, repository_name=repository_name)
 
-        except securesystemslib.exceptions.KeyAlreadyExistsError:
+        except tuf.exceptions.KeyAlreadyExistsError:
           pass
 
       for role in metadata_object['delegations']['roles']:
@@ -984,35 +1017,6 @@ def _strip_prefix_from_targets_metadata(targets_metadata, prefix):
 
   return targets_metadata
 
-
-
-# Wrapper functions that we wish to make available here from repository_lib.py.
-# Users are expected to call functions provided by repository_tool.py.  We opt
-# for this approach, as opposed to using import statements to achieve the
-# equivalent, to avoid linter warnings for unused imports.
-def generate_and_write_rsa_keypair(filepath, bits, password):
-  return repo_lib.generate_and_write_rsa_keypair(filepath, bits, password)
-
-def generate_and_write_ed25519_keypair(filepath, password):
-  return repo_lib.generate_and_write_ed25519_keypair(filepath, password)
-
-def import_rsa_publickey_from_file(filepath):
-  return repo_lib.import_rsa_publickey_from_file(filepath)
-
-def import_ed25519_publickey_from_file(filepath):
-  return repo_lib.import_ed25519_publickey_from_file(filepath)
-
-def import_rsa_privatekey_from_file(filepath, password):
-  return repo_lib.import_rsa_privatekey_from_file(filepath, password)
-
-def import_ed25519_privatekey_from_file(filepath, password):
-  return repo_lib.import_ed25519_privatekey_from_file(filepath, password)
-
-def create_tuf_client_directory(repository_directory, client_directory):
-  return repo_lib.create_tuf_client_directory(repository_directory, client_directory)
-
-def disable_console_log_messages():
-  return repo_lib.disable_console_log_messages()
 
 
 

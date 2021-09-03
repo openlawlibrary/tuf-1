@@ -51,7 +51,7 @@ import tuf.formats
 _SUPPORTED_KEY_TYPES = ['rsa', 'ed25519', 'ecdsa-sha2-nistp256']
 
 # See 'log.py' to learn how logging is handled in TUF.
-logger = logging.getLogger('tuf.keydb')
+logger = logging.getLogger(__name__)
 
 # The key database.
 _keydb_dict = {}
@@ -67,7 +67,7 @@ def create_keydb_from_root_metadata(root_metadata, repository_name='default'):
   <Purpose>
     Populate the key database with the unique keys found in 'root_metadata'.
     The database dictionary will conform to
-    'securesystemslib.formats.KEYDB_SCHEMA' and have the form: {keyid: key,
+    'tuf.formats.KEYDB_SCHEMA' and have the form: {keyid: key,
     ...}.  The 'keyid' conforms to 'securesystemslib.formats.KEYID_SCHEMA' and
     'key' to its respective type.  In the case of RSA keys, this object would
     match 'RSAKEY_SCHEMA'.
@@ -118,35 +118,27 @@ def create_keydb_from_root_metadata(root_metadata, repository_name='default'):
 
   # Iterate the keys found in 'root_metadata' by converting them to
   # 'RSAKEY_SCHEMA' if their type is 'rsa', and then adding them to the
-  # key database.
-  for junk, key_metadata in six.iteritems(root_metadata['keys']):
+  # key database using the provided keyid.
+  for keyid, key_metadata in six.iteritems(root_metadata['keys']):
     if key_metadata['keytype'] in _SUPPORTED_KEY_TYPES:
       # 'key_metadata' is stored in 'KEY_SCHEMA' format.  Call
       # create_from_metadata_format() to get the key in 'RSAKEY_SCHEMA' format,
-      # which is the format expected by 'add_key()'.  Note: The 'keyids'
-      # returned by format_metadata_to_key() include keyids in addition to the
-      # default keyid listed in 'key_dict'.  The additional keyids are
-      # generated according to securesystemslib.settings.HASH_ALGORITHMS.
+      # which is the format expected by 'add_key()'.  Note: This call to
+      # format_metadata_to_key() uses the provided keyid as the default keyid.
+      # All other keyids returned are ignored.
 
-      # The repo may have used hashing algorithms for the generated keyids that
-      # doesn't match the client's set of hash algorithms.  Make sure to only
-      # used the repo's selected hashing algorithms.
-      hash_algorithms = securesystemslib.settings.HASH_ALGORITHMS
-      securesystemslib.settings.HASH_ALGORITHMS = key_metadata['keyid_hash_algorithms']
-      key_dict, keyids = securesystemslib.keys.format_metadata_to_key(key_metadata)
-      securesystemslib.settings.HASH_ALGORITHMS = hash_algorithms
+      key_dict, _ = securesystemslib.keys.format_metadata_to_key(key_metadata,
+          keyid)
 
+      # Make sure to update key_dict['keyid'] to use one of the other valid
+      # keyids, otherwise add_key() will have no reference to it.
       try:
-        for keyid in keyids:
-          # Make sure to update key_dict['keyid'] to use one of the other valid
-          # keyids, otherwise add_key() will have no reference to it.
-          key_dict['keyid'] = keyid
-          add_key(key_dict, keyid=None, repository_name=repository_name)
+        add_key(key_dict, repository_name=repository_name)
 
       # Although keyid duplicates should *not* occur (unique dict keys), log a
-      # warning and continue.  Howerver, 'key_dict' may have already been
+      # warning and continue.  However, 'key_dict' may have already been
       # adding to the keydb elsewhere.
-      except securesystemslib.exceptions.KeyAlreadyExistsError as e: # pragma: no cover
+      except tuf.exceptions.KeyAlreadyExistsError as e: # pragma: no cover
         logger.warning(e)
         continue
 
@@ -267,7 +259,7 @@ def add_key(key_dict, keyid=None, repository_name='default',
 
     securesystemslib.exceptions.Error, if 'keyid' does not match the keyid for 'rsakey_dict'.
 
-    securesystemslib.exceptions.KeyAlreadyExistsError, if 'rsakey_dict' is found in the key database.
+    tuf.exceptions.KeyAlreadyExistsError, if 'rsakey_dict' is found in the key database.
 
     securesystemslib.exceptions.InvalidNameError, if 'repository_name' does not exist in the key
     database.
@@ -306,7 +298,7 @@ def add_key(key_dict, keyid=None, repository_name='default',
   # available in the key database before returning.
   keyid = key_dict['keyid']
   if keyid in _keydb_dict[repository_name]:
-    raise securesystemslib.exceptions.KeyAlreadyExistsError('Key: ' + keyid)
+    raise tuf.exceptions.KeyAlreadyExistsError('Key: ' + keyid)
 
   if keyid in _signature_providerdb_dict[repository_name]:
     raise tuf.exceptions.SignatureProviderAlreadyExistsError('Key id: ' + keyid)
@@ -334,7 +326,7 @@ def get_key(keyid, repository_name='default'):
   <Exceptions>
     securesystemslib.exceptions.FormatError, if the arguments do not have the correct format.
 
-    securesystemslib.exceptions.UnknownKeyError, if 'keyid' is not found in the keydb database.
+    tuf.exceptions.UnknownKeyError, if 'keyid' is not found in the keydb database.
 
     securesystemslib.exceptions.InvalidNameError, if 'repository_name' does not exist in the key
     database.
@@ -364,8 +356,8 @@ def get_key(keyid, repository_name='default'):
   try:
     return copy.deepcopy(_keydb_dict[repository_name][keyid])
 
-  except KeyError:
-    raise securesystemslib.exceptions.UnknownKeyError('Key: ' + keyid)
+  except KeyError as error:
+    six.raise_from(tuf.exceptions.UnknownKeyError('Key: ' + keyid), error)
 
 
 
@@ -434,7 +426,7 @@ def remove_key(keyid, repository_name='default'):
   <Exceptions>
     securesystemslib.exceptions.FormatError, if the arguments do not have the correct format.
 
-    securesystemslib.exceptions.UnknownKeyError, if 'keyid' is not found in key database.
+    tuf.exceptions.UnknownKeyError, if 'keyid' is not found in key database.
 
     securesystemslib.exceptions.InvalidNameError, if 'repository_name' does not exist in the key
     database.
@@ -464,7 +456,7 @@ def remove_key(keyid, repository_name='default'):
     del _keydb_dict[repository_name][keyid]
 
   else:
-    raise securesystemslib.exceptions.UnknownKeyError('Key: ' + keyid)
+    raise tuf.exceptions.UnknownKeyError('Key: ' + keyid)
 
   # Remove the signature provider belonging to 'keyid'
   if keyid in _signature_providerdb_dict[repository_name]:

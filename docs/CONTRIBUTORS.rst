@@ -81,44 +81,102 @@ and instructions for installing locally from source are provided here:
     $ cd virtualenv-15.0.3
     $ python virtualenv.py myVE
 
-External Dependencies
-=====================
-
-Before installing TUF, a couple of its Python dependencies have non-Python dependencies
-of their own that should installed first.  PyCrypto and PyNaCl (third-party dependencies
-needed by the repository tools) require Python and FFI (Foreign Function Interface)
-development header files. Debian-based distributions can install these header
-libraries with apt (Advanced Package Tool.)
-::
-
-    $ apt-get install build-essential libssl-dev libffi-dev python-dev
-
-Fedora-based distributions can install these libraries with dnf.
-::
-
-    $ dnf install libffi-devel redhat-rpm-config openssl-devel
-
-OS X users can install these header libraries with the `Homebrew <https://brew.sh/>`_ package manager.
-::
-
-    $ brew install python
-    $ brew install libffi
 
 Development Installation
 ========================
 
-Installation of minimal, optional, development, and testing requirements
-can then be accomplished with one command:
+To work on the TUF project, it's best to perform a development install.
+
+1. First, `install non-Python dependencies <INSTALLATION.rst#non-python-dependencies>`_.
+
+2. Then clone this repository:
+
 ::
 
-    $ pip install -r dev-requirements.txt
+    $ git clone https://github.com/theupdateframework/tuf
+
+3. Then perform a full, editable/development install.  This will include all
+   optional cryptographic support, the testing/linting dependencies, etc.
+   With a development installation, modifications to the code in the current
+   directory will affect the installed version of TUF.
+
+::
+
+    $ pip install -r requirements-dev.txt
+
 
 Testing
 =======
 
-The Update Framework's unit tests can be executed by invoking
-`tox <https://testrun.org/tox/>`_. All supported Python versions are
-tested, but must already be installed locally.
+The Update Framework's unit test suite can be executed by invoking the test
+aggregation script inside the *tests* subdirectory. ``tuf`` and its
+dependencies must already be installed (see above).
+::
+
+    $ cd tests
+    $ python aggregate_tests.py
+
+Individual tests can also be executed. Optional '-v' flags can be added to
+increase log level up to DEBUG ('-vvvv').
+::
+
+    $ python test_updater.py # run a specific test file
+    $ python test_updater.py TestUpdater.test_4_refresh # run a specific test
+    $ python test_updater.py -vvvv TestUpdater.test_4_refresh # run test with DEBUG log level
+
+
+All of the log levels and the corresponding options that could be used for testing are:
+
+.. list-table::
+   :widths: 20 25
+   :header-rows: 1
+
+   * - Option
+     - Log Level
+   * - default (no argument passed)
+     - ERROR (test names are not printed)
+   * - `-v`
+     - ERROR (test names are printed at this level and above)
+   * - `-vv`
+     - WARNING
+   * - `-vvv`
+     - INFO
+   * - `-vvvv`
+     - DEBUG
+
+
+To run the tests and measure their code coverage, the aggregation script can be
+invoked with the ``coverage`` tool (requires installation of ``coverage``, e.g.
+via PyPI).
+::
+
+    $ coverage run aggregate_tests.py && coverage report
+
+
+To develop and test ``tuf`` with above commands alongside its in-house dependency
+`securesystemslib <https://github.com/secure-systems-lab/securesystemslib>`_,
+it is recommended to first make an editable install of ``tuf`` (in
+a *venv*), and then install ``securesystemslib`` in editable mode too (in the same *venv*).
+::
+
+    $ cd path/to/tuf
+    $ pip install -r requirements-dev.txt
+    $ cd path/to/securesystemslib
+    $ pip install -r requirements-dev.txt
+
+
+With `tox <https://testrun.org/tox/>`_ the test suite can be executed in a
+separate *venv* for each supported Python version. While the supported
+Python versions must already be available, ``tox`` will install ``tuf`` and its
+dependencies anew in each environment.
 ::
 
     $ tox
+
+
+An additional non-default ``tox`` environment is available and can be used to
+test ``tuf`` against the tip of development of ``securesystemslib`` on GitHub,
+to e.g. prepare the former for a new release of the latter.
+::
+
+    $ tox -e with-sslib-master

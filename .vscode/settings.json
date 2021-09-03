@@ -5,7 +5,7 @@
     "--indent-size=2",
     "--max-line-length=99"
   ],
-  "python.linting.pep8Args": [
+  "python.linting.pycodestyleArgs": [
     "--indent-size=2",
     "--max-line-length=99"
   ],

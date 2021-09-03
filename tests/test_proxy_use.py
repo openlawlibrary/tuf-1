@@ -35,14 +35,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import unicode_literals
 
-import hashlib
 import logging
 import os
-import random
-import subprocess
-import sys
-import time
 import unittest
+import sys
 
 import tuf
 import tuf.download as download
@@ -50,12 +46,18 @@ import tuf.log
 import tuf.unittest_toolbox as unittest_toolbox
 import tuf.exceptions
 
-import requests.exceptions
+from tests import utils
 
-import securesystemslib
 import six
 
-logger = logging.getLogger('tuf.test_download')
+logger = logging.getLogger(__name__)
+
+IS_PY_VERSION_SUPPORTED = sys.version_info == (2, 7)
+
+# Use setUpModule to tell unittest runner to skip this test module gracefully.
+def setUpModule():
+    if not IS_PY_VERSION_SUPPORTED:
+        raise unittest.SkipTest('requires Python 2.7')
 
 class TestWithProxies(unittest_toolbox.Modified_TestCase):
 
@@ -76,26 +78,26 @@ class TestWithProxies(unittest_toolbox.Modified_TestCase):
 
     unittest_toolbox.Modified_TestCase.setUpClass()
 
+    if not six.PY2:
+      raise NotImplementedError("TestWithProxies only works with Python 2"
+                                " (proxy_server.py is Python2 only)")
+
     # Launch a simple HTTP server (serves files in the current dir).
-    cls.http_port = random.randint(30000, 45000)
-    cls.http_server_proc = popen_python(
-        ['simple_server.py', str(cls.http_port)])
+    cls.http_server_handler = utils.TestServerProcess(log=logger)
 
     # Launch an HTTPS server (serves files in the current dir).
-    cls.https_port = cls.http_port + 1
-    cls.https_server_proc = popen_python(
-        ['simple_https_server.py', str(cls.https_port)])
-
+    cls.https_server_handler = utils.TestServerProcess(log=logger,
+        server='simple_https_server.py')
 
     # Launch an HTTP proxy server derived from inaz2/proxy2.
     # This one is able to handle HTTP CONNECT requests, and so can pass HTTPS
     # requests on to the target server.
-    cls.http_proxy_port = cls.http_port + 2
-    cls.http_proxy_proc = popen_python(
-        ['proxy_server.py', str(cls.http_proxy_port)])
+    cls.http_proxy_handler = utils.TestServerProcess(log=logger,
+        server='proxy_server.py')
+
     # Note that the HTTP proxy server's address uses http://, regardless of the
     # type of connection used with the target server.
-    cls.http_proxy_addr = 'http://127.0.0.1:' + str(cls.http_proxy_port)
+    cls.http_proxy_addr = 'http://127.0.0.1:' + str(cls.http_proxy_handler.port)
 
 
     # Launch an HTTPS proxy server, also derived from inaz2/proxy2.
@@ -110,23 +112,14 @@ class TestWithProxies(unittest_toolbox.Modified_TestCase):
     # 3rd arg: (optional) certificate file for telling the proxy what target
     #   server certs to accept in its HTTPS connection to the target server.
     #   This is only relevant if the proxy is in intercept mode.
-    cls.https_proxy_port = cls.http_port + 3
-    cls.https_proxy_proc = popen_python(
-        ['proxy_server.py', str(cls.https_proxy_port), 'intercept',
-        os.path.join('ssl_certs', 'ssl_cert.crt')])
+    good_cert_fpath = os.path.join('ssl_certs', 'ssl_cert.crt')
+    cls.https_proxy_handler = utils.TestServerProcess(log=logger,
+        server='proxy_server.py', extra_cmd_args=['intercept',
+        good_cert_fpath])
+
     # Note that the HTTPS proxy server's address uses https://, regardless of
     # the type of connection used with the target server.
-    cls.https_proxy_addr = 'https://127.0.0.1:' + str(cls.https_proxy_port)
-
-    # Give the HTTP server and proxy server processes a little bit of time to
-    # start listening before allowing tests to begin, lest we get "Connection
-    # refused" errors. On the first test system. 0.1s was too short and 0.15s
-    # was long enough. Use 0.5s to be safe, and if issues arise, increase it.
-    # Observed occasional failures at 0.1s, 0.15s, 0.5s, and 2s, primarily on
-    # AppVeyor.  Increasing to 4s.  This setup runs once for the module.
-    time.sleep(4)
-
-
+    cls.https_proxy_addr = 'https://localhost:' + str(cls.https_proxy_handler.port)
 
 
 
@@ -139,15 +132,15 @@ class TestWithProxies(unittest_toolbox.Modified_TestCase):
     """
     unittest_toolbox.Modified_TestCase.tearDownClass()
 
-    for proc in [
-        cls.http_server_proc,
-        cls.https_server_proc,
-        cls.http_proxy_proc,
-        cls.https_proxy_proc,
+    for proc_handler in [
+        cls.http_server_handler,
+        cls.https_server_handler,
+        cls.http_proxy_handler,
+        cls.https_proxy_handler,
       ]:
-      if proc.returncode is None:
-        logger.info('\tTerminating process ' + str(proc.pid) + ' in cleanup.')
-        proc.kill()
+
+        # Kill the SimpleHTTPServer process.
+        proc_handler.clean()
 
 
 
@@ -165,16 +158,16 @@ class TestWithProxies(unittest_toolbox.Modified_TestCase):
     # and its url on the server.
     current_dir = os.getcwd()
     target_filepath = self.make_temp_data_file(directory=current_dir)
-    rel_target_filepath = os.path.basename(target_filepath)
 
     with open(target_filepath, 'r') as target_file_object:
       self.target_data_length = len(target_file_object.read())
 
+    suffix = '/' + os.path.basename(target_filepath)
     self.url = \
-        'http://localhost:' + str(self.http_port) + '/' + rel_target_filepath
+        'http://localhost:' + str(self.http_server_handler.port) + suffix
 
     self.url_https = \
-        'https://localhost:' + str(self.https_port) + '/' + rel_target_filepath
+        'https://localhost:' + str(self.https_server_handler.port) + suffix
 
 
 
@@ -189,6 +182,15 @@ class TestWithProxies(unittest_toolbox.Modified_TestCase):
 
     self.restore_all_modified_env_values()
 
+    for proc_handler in [
+        self.http_server_handler,
+        self.https_server_handler,
+        self.http_proxy_handler,
+        self.https_proxy_handler,
+      ]:
+
+        # Logs stdout and stderr from the sever subprocess.
+        proc_handler.flush_log()
 
 
 
@@ -354,32 +356,13 @@ class TestWithProxies(unittest_toolbox.Modified_TestCase):
 
 
 
-
-
   def restore_all_modified_env_values(self):
     for key in self.old_env_values:
       self.restore_env_value(key)
 
 
 
-
-
-# TODO: Move this to a common test module (tests/common.py?)
-#       and strip it test_proxy_use.py and test_download.py.
-def popen_python(command_arg_list):
-  """
-  Run subprocess.Popen() to produce a process running a Python interpreter.
-  Uses the same Python interpreter that the current process is using, via
-  sys.executable.
-  """
-  assert sys.executable, 'Test cannot function: unable to determine ' \
-      'current Python interpreter via sys.executable.'
-
-  return subprocess.Popen(
-      [sys.executable] + command_arg_list, stderr=subprocess.PIPE)
-
-
-
 # Run unit test.
 if __name__ == '__main__':
+  utils.configure_test_logging(sys.argv)
   unittest.main()

@@ -1,0 +1,15 @@
+# Install requirements needed in each tox environment
+
+# pinned tuf runtime dependencies (should auto-update and -trigger ci/cd)
+-r requirements-pinned.txt
+
+# test runtime dependencies  (see 'tests_require' field in setup.py)
+mock; python_version < "3.3"
+
+# tuf.api tests use python-dateutil
+python-dateutil
+
+# additional test tools for linting and coverage measurement
+coverage
+pylint
+bandit; python_version >= "3.5"

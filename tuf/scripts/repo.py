@@ -24,7 +24,7 @@
 
   Note:
   'pip install securesystemslib[crypto,pynacl]' is required by the CLI,
-  which installs the 3rd-party dependencies: cryptography, pynacl, and colorama.
+  which installs the 3rd-party dependencies: cryptography and pynacl.
 
 <Usage>
   Note: arguments within brackets are optional.
@@ -112,7 +112,7 @@
     in --role) to --delegatee role with specified <rolename>.
     
   --delegatee:
-    Specify role that is targetted by delegator in --role to sign for
+    Specify role that is targeted by delegator in --role to sign for
     target files matching delegated <glob pattern> or in revocation of trust.
     
   --terminating:
@@ -153,14 +153,14 @@ import tuf.formats
 import tuf.repository_tool as repo_tool
 
 # 'pip install securesystemslib[crypto,pynacl]' is required for the CLI,
-# which installs the cryptography, pynacl, and colorama dependencies.
+# which installs the cryptography and pynacl.
 import securesystemslib
-from colorama import Fore
+from securesystemslib import interface
 import six
 
 
 # See 'log.py' to learn how logging is handled in TUF.
-logger = logging.getLogger('tuf.scripts.repo')
+logger = logging.getLogger(__name__)
 
 repo_tool.disable_console_log_messages()
 
@@ -189,6 +189,8 @@ SUPPORTED_CLI_KEYTYPES = (ECDSA_KEYTYPE, ED25519_KEYTYPE, RSA_KEYTYPE)
 # securesystemslib.
 SUPPORTED_KEY_TYPES = ('ed25519', 'ecdsa-sha2-nistp256', 'rsa')
 
+# pylint: disable=protected-access
+# ... to allow use of sslib _generate_and_write_*_keypair convenience methods
 
 def process_command_line_arguments(parsed_arguments):
   """
@@ -379,23 +381,30 @@ def gen_key(parsed_arguments):
 
   keypath = None
 
+  keygen_kwargs = {
+      "password": parsed_arguments.pw,
+      "filepath": parsed_arguments.filename,
+      "prompt": (not parsed_arguments.pw) # prompt if no default or passed pw
+  }
+
   if parsed_arguments.key not in SUPPORTED_CLI_KEYTYPES:
     tuf.exceptions.Error(
         'Invalid key type: ' + repr(parsed_arguments.key) + '.  Supported'
         ' key types: ' + repr(SUPPORTED_CLI_KEYTYPES))
 
   elif parsed_arguments.key == ECDSA_KEYTYPE:
-    keypath = securesystemslib.interface.generate_and_write_ecdsa_keypair(
-      parsed_arguments.filename, password=parsed_arguments.pw)
+    keypath = securesystemslib.interface._generate_and_write_ecdsa_keypair(
+        **keygen_kwargs)
 
   elif parsed_arguments.key == ED25519_KEYTYPE:
-    keypath = securesystemslib.interface.generate_and_write_ed25519_keypair(
-        parsed_arguments.filename, password=parsed_arguments.pw)
+    keypath = securesystemslib.interface._generate_and_write_ed25519_keypair(
+        **keygen_kwargs)
 
   # RSA key..
   else:
-    keypath = securesystemslib.interface.generate_and_write_rsa_keypair(
-        parsed_arguments.filename, password=parsed_arguments.pw)
+    keypath = securesystemslib.interface._generate_and_write_rsa_keypair(
+        **keygen_kwargs)
+
 
   # If a filename is not given, the generated keypair is saved to the current
   # working directory.  By default, the keypair is written to <KEYID>.pub
@@ -428,7 +437,7 @@ def import_privatekey_from_file(keypath, password=None):
     # However, care should be taken when including the full path in exceptions
     # and log files.
     password = securesystemslib.interface.get_password('Enter a password for'
-        ' the encrypted key (' + Fore.RED + repr(keypath) + Fore.RESET + '): ',
+        ' the encrypted key (' + interface.TERM_RED + repr(keypath) + interface.TERM_RED + '): ',
         confirm=False)
 
   # Does 'password' have the correct format?
@@ -439,15 +448,13 @@ def import_privatekey_from_file(keypath, password=None):
   encrypted_key = None
 
   with open(keypath, 'rb') as file_object:
-    encrypted_key = file_object.read()
+    encrypted_key = file_object.read().decode('utf-8')
 
   # Decrypt the loaded key file, calling the 'cryptography' library to generate
   # the derived encryption key from 'password'.  Raise
   # 'securesystemslib.exceptions.CryptoError' if the decryption fails.
   try:
-
-    key_object = securesystemslib.keys.decrypt_key(encrypted_key.decode('utf-8'),
-        password)
+    key_object = securesystemslib.keys.decrypt_key(encrypted_key, password)
 
   except securesystemslib.exceptions.CryptoError:
     try:
@@ -456,10 +463,10 @@ def import_privatekey_from_file(keypath, password=None):
       key_object = securesystemslib.keys.import_rsakey_from_private_pem(
           encrypted_key, 'rsassa-pss-sha256', password)
 
-    except securesystemslib.exceptions.CryptoError:
-      raise tuf.exceptions.Error(repr(keypath) + ' cannot be imported, possibly'
-          ' because an invalid key file is given or the decryption password is'
-          ' incorrect.')
+    except securesystemslib.exceptions.CryptoError as error:
+      six.raise_from(tuf.exceptions.Error(repr(keypath) + ' cannot be '
+          ' imported, possibly because an invalid key file is given or '
+          ' the decryption password is incorrect.'), error)
 
   if key_object['keytype'] not in SUPPORTED_KEY_TYPES:
     raise tuf.exceptions.Error('Trying to import an unsupported key'
@@ -565,7 +572,7 @@ def remove_verification_key(parsed_arguments):
     # It is assumed remove_verification_key() only raises
     # securesystemslib.exceptions.Error and
     # securesystemslib.exceptions.FormatError, and the latter is not raised
-    # bacause a valid key should have been returned by
+    # because a valid key should have been returned by
     # import_publickey_from_file().
     except securesystemslib.exceptions.Error:
       print(repr(keypath) + ' is not a trusted key.  Skipping.')
@@ -891,26 +898,27 @@ def set_top_level_keys(repository, parsed_arguments):
   Generate, write, and set the top-level keys.  'repository' is modified.
   """
 
-  # Examples of how the --pw command-line option is interpreted:
-  # repo.py --init': parsed_arguments.pw = 'pw'
-  # repo.py --init --pw my_pw: parsed_arguments.pw = 'my_pw'
-  # repo.py --init --pw: The user is prompted for a password, here.
-  if not parsed_arguments.pw:
-    parsed_arguments.pw = securesystemslib.interface.get_password(
-        prompt='Enter a password for the top-level role keys: ', confirm=True)
+  # Examples of how the --*_pw command-line options are interpreted:
+  # repo.py --init': parsed_arguments.*_pw = 'pw'
+  # repo.py --init --*_pw my_pw: parsed_arguments.*_pw = 'my_pw'
+  # repo.py --init --*_pw: The user is prompted for a password.
 
-  repo_tool.generate_and_write_ed25519_keypair(
-      os.path.join(parsed_arguments.path, KEYSTORE_DIR,
-      ROOT_KEY_NAME), password=parsed_arguments.root_pw)
-  repo_tool.generate_and_write_ed25519_keypair(
-      os.path.join(parsed_arguments.path, KEYSTORE_DIR,
-      TARGETS_KEY_NAME), password=parsed_arguments.targets_pw)
-  repo_tool.generate_and_write_ed25519_keypair(
-      os.path.join(parsed_arguments.path, KEYSTORE_DIR,
-      SNAPSHOT_KEY_NAME), password=parsed_arguments.snapshot_pw)
-  repo_tool.generate_and_write_ed25519_keypair(
-      os.path.join(parsed_arguments.path, KEYSTORE_DIR,
-      TIMESTAMP_KEY_NAME), password=parsed_arguments.timestamp_pw)
+  securesystemslib.interface._generate_and_write_ed25519_keypair(
+      password=parsed_arguments.root_pw,
+      filepath=os.path.join(parsed_arguments.path, KEYSTORE_DIR, ROOT_KEY_NAME),
+      prompt=(not parsed_arguments.root_pw))
+  securesystemslib.interface._generate_and_write_ed25519_keypair(
+      password=parsed_arguments.targets_pw,
+      filepath=os.path.join(parsed_arguments.path, KEYSTORE_DIR, TARGETS_KEY_NAME),
+      prompt=(not parsed_arguments.targets_pw))
+  securesystemslib.interface._generate_and_write_ed25519_keypair(
+      password=parsed_arguments.snapshot_pw,
+      filepath=os.path.join(parsed_arguments.path, KEYSTORE_DIR, SNAPSHOT_KEY_NAME),
+      prompt=(not parsed_arguments.snapshot_pw))
+  securesystemslib.interface._generate_and_write_ed25519_keypair(
+      password=parsed_arguments.timestamp_pw,
+      filepath=os.path.join(parsed_arguments.path, KEYSTORE_DIR, TIMESTAMP_KEY_NAME),
+      prompt=(not parsed_arguments.timestamp_pw))
 
   # Import the private keys.  They are needed to generate the signatures
   # included in metadata.

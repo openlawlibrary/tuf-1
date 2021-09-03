@@ -37,25 +37,37 @@ import sys
 import random
 
 import six
+from six.moves.SimpleHTTPServer import SimpleHTTPRequestHandler
 
-PORT = 0
 
-def _port_gen():
-  return random.randint(30000, 45000)
+class QuietHTTPRequestHandler(SimpleHTTPRequestHandler):
+  """A SimpleHTTPRequestHandler that does not write incoming requests to
+  stderr. """
+  def log_request(self, code='-', size='-'):
+    pass
 
-if len(sys.argv) > 1:
-  try:
-    PORT = int(sys.argv[1])
-    if PORT < 30000 or PORT > 45000:
-      raise ValueError
+# NOTE: On Windows/Python2 tests that use this simple_server.py in a
+# subprocesses hang after a certain amount of requests (~68), if a PIPE is
+# passed as Popen's stderr argument. This problem doesn't emerge if
+# we silence the HTTP messages.
+# If you decide to receive the HTTP messages, then this bug
+# could reappear.
+use_quiet_http_request_handler = True
 
-  except ValueError:
-    PORT = _port_gen()
+if len(sys.argv) > 2:
+  use_quiet_http_request_handler = sys.argv[2]
 
+if use_quiet_http_request_handler:
+  handler = QuietHTTPRequestHandler
 else:
-  PORT = _port_gen()
+  handler = SimpleHTTPRequestHandler
 
-Handler = six.moves.SimpleHTTPServer.SimpleHTTPRequestHandler
-httpd = six.moves.socketserver.TCPServer(('', PORT), Handler)
+# Allow re-use so you can re-run tests as often as you want even if the
+# tests re-use ports. Otherwise TCP TIME-WAIT prevents reuse for ~1 minute
+six.moves.socketserver.TCPServer.allow_reuse_address = True
 
+httpd = six.moves.socketserver.TCPServer(('localhost', 0), handler)
+port_message = 'bind succeeded, server port is: ' \
+    + str(httpd.server_address[1])
+print(port_message)
 httpd.serve_forever()

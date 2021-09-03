@@ -44,14 +44,11 @@ from __future__ import unicode_literals
 
 import os
 import tempfile
-import random
-import time
 import shutil
 import json
-import subprocess
 import logging
-import sys
 import unittest
+import sys
 
 import tuf.formats
 import tuf.log
@@ -60,10 +57,12 @@ import tuf.roledb
 import tuf.keydb
 import tuf.unittest_toolbox as unittest_toolbox
 
+from tests import utils
+
 import securesystemslib
 import six
 
-logger = logging.getLogger('tuf.test_extraneous_dependencies_attack')
+logger = logging.getLogger(__name__)
 
 
 
@@ -71,8 +70,6 @@ class TestExtraneousDependenciesAttack(unittest_toolbox.Modified_TestCase):
 
   @classmethod
   def setUpClass(cls):
-    # setUpClass() is called before any of the test cases are executed.
-
     # Create a temporary directory to store the repository, metadata, and target
     # files.  'temporary_directory' must be deleted in TearDownModule() so that
     # temporary files are always removed, even when exceptions occur.
@@ -85,33 +82,19 @@ class TestExtraneousDependenciesAttack(unittest_toolbox.Modified_TestCase):
     # the pre-generated metadata files have a specific structure, such
     # as a delegated role 'targets/role1', three target files, five key files,
     # etc.
-    cls.SERVER_PORT = random.randint(30000, 45000)
-    command = ['python', 'simple_server.py', str(cls.SERVER_PORT)]
-    cls.server_process = subprocess.Popen(command, stderr=subprocess.PIPE)
-    logger.info('Server process started.')
-    logger.info('Server process id: '+str(cls.server_process.pid))
-    logger.info('Serving on port: '+str(cls.SERVER_PORT))
-    cls.url = 'http://localhost:'+str(cls.SERVER_PORT) + os.path.sep
-
-    # NOTE: Following error is raised if a delay is not applied:
-    # <urlopen error [Errno 111] Connection refused>
-    time.sleep(.7)
+    cls.server_process_handler = utils.TestServerProcess(log=logger)
 
 
 
   @classmethod
   def tearDownClass(cls):
-    # tearDownModule() is called after all the test cases have run.
-    # http://docs.python.org/2/library/unittest.html#class-and-module-fixtures
+    # Cleans the resources and flush the logged lines (if any).
+    cls.server_process_handler.clean()
 
     # Remove the temporary repository directory, which should contain all the
     # metadata, targets, and key files generated of all the test cases.
     shutil.rmtree(cls.temporary_directory)
 
-    # Kill the SimpleHTTPServer process.
-    if cls.server_process.returncode is None:
-      logger.info('Server process '+str(cls.server_process.pid)+' terminated.')
-      cls.server_process.kill()
 
 
 
@@ -150,16 +133,15 @@ class TestExtraneousDependenciesAttack(unittest_toolbox.Modified_TestCase):
     # Set the url prefix required by the 'tuf/client/updater.py' updater.
     # 'path/to/tmp/repository' -> 'localhost:8001/tmp/repository'.
     repository_basepath = self.repository_directory[len(os.getcwd()):]
-    url_prefix = \
-      'http://localhost:' + str(self.SERVER_PORT) + repository_basepath
+    url_prefix = 'http://localhost:' \
+        + str(self.server_process_handler.port) + repository_basepath
 
     # Setting 'tuf.settings.repository_directory' with the temporary client
     # directory copied from the original repository files.
     tuf.settings.repositories_directory = self.client_directory
     self.repository_mirrors = {'mirror1': {'url_prefix': url_prefix,
                                            'metadata_path': 'metadata',
-                                           'targets_path': 'targets',
-                                           'confined_target_dirs': ['']}}
+                                           'targets_path': 'targets'}}
 
     # Create the repository instance.  The test cases will use this client
     # updater to refresh metadata, fetch target files, etc.
@@ -174,7 +156,8 @@ class TestExtraneousDependenciesAttack(unittest_toolbox.Modified_TestCase):
     tuf.roledb.clear_roledb(clear_all=True)
     tuf.keydb.clear_keydb(clear_all=True)
 
-
+    # Logs stdout and stderr from the sever subprocess.
+    self.server_process_handler.flush_log()
 
 
   def test_with_tuf(self):
@@ -217,7 +200,8 @@ class TestExtraneousDependenciesAttack(unittest_toolbox.Modified_TestCase):
     self.repository_updater.refresh()
 
     try:
-      self.repository_updater.targets_of_role('role1')
+      with utils.ignore_deprecation_warnings('tuf.client.updater'):
+        self.repository_updater.targets_of_role('role1')
 
     # Verify that the specific 'tuf.exceptions.ForbiddenTargetError' exception is raised
     # by each mirror.
@@ -235,4 +219,5 @@ class TestExtraneousDependenciesAttack(unittest_toolbox.Modified_TestCase):
 
 
 if __name__ == '__main__':
+  utils.configure_test_logging(sys.argv)
   unittest.main()

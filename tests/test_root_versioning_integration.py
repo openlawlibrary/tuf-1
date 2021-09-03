@@ -29,8 +29,8 @@ import os
 import logging
 import tempfile
 import shutil
-import sys
 import unittest
+import sys
 
 import tuf
 import tuf.log
@@ -40,9 +40,12 @@ import tuf.roledb
 import tuf.keydb
 import tuf.repository_tool as repo_tool
 
-import securesystemslib
+from tests import utils
 
-logger = logging.getLogger('tuf.test_root_versioning')
+import securesystemslib
+import securesystemslib.storage
+
+logger = logging.getLogger(__name__)
 
 repo_tool.disable_console_log_messages()
 
@@ -63,9 +66,11 @@ class TestRepository(unittest.TestCase):
 
   def test_init(self):
     # Test normal case.
+    storage_backend = securesystemslib.storage.FilesystemBackend()
     repository = repo_tool.Repository('repository_directory/',
                                       'metadata_directory/',
-                                      'targets_directory/')
+                                      'targets_directory/',
+                                      storage_backend)
     self.assertTrue(isinstance(repository.root, repo_tool.Root))
     self.assertTrue(isinstance(repository.snapshot, repo_tool.Snapshot))
     self.assertTrue(isinstance(repository.timestamp, repo_tool.Timestamp))
@@ -73,11 +78,11 @@ class TestRepository(unittest.TestCase):
 
     # Test improperly formatted arguments.
     self.assertRaises(securesystemslib.exceptions.FormatError, repo_tool.Repository, 3,
-                      'metadata_directory/', 'targets_directory')
+                      'metadata_directory/', 'targets_directory', storage_backend)
     self.assertRaises(securesystemslib.exceptions.FormatError, repo_tool.Repository,
-                      'repository_directory', 3, 'targets_directory')
+                      'repository_directory', 3, 'targets_directory', storage_backend)
     self.assertRaises(securesystemslib.exceptions.FormatError, repo_tool.Repository,
-                      'repository_directory', 'metadata_directory', 3)
+                      'repository_directory', 'metadata_directory', storage_backend, 3)
 
 
 
@@ -165,15 +170,15 @@ class TestRepository(unittest.TestCase):
     repository.timestamp.load_signing_key(timestamp_privkey)
 
     # (4) Add target files.
-    target1 = os.path.join(targets_directory, 'file1.txt')
-    target2 = os.path.join(targets_directory, 'file2.txt')
-    target3 = os.path.join(targets_directory, 'file3.txt')
+    target1 = 'file1.txt'
+    target2 = 'file2.txt'
+    target3 = 'file3.txt'
     repository.targets.add_target(target1)
     repository.targets.add_target(target2)
 
 
     # (5) Perform delegation.
-    repository.targets.delegate('role1', [role1_pubkey], [os.path.basename(target3)])
+    repository.targets.delegate('role1', [role1_pubkey], [target3])
     repository.targets('role1').load_signing_key(role1_privkey)
 
     # (6) Write repository.
@@ -225,4 +230,5 @@ class TestRepository(unittest.TestCase):
 
 
 if __name__ == '__main__':
+  utils.configure_test_logging(sys.argv)
   unittest.main()

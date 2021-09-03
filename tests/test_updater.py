@@ -55,11 +55,15 @@ import shutil
 import copy
 import tempfile
 import logging
-import random
-import subprocess
-import sys
 import errno
+import sys
 import unittest
+import json
+
+if sys.version_info >= (3, 3):
+  import unittest.mock as mock
+else:
+  import mock
 
 import tuf
 import tuf.exceptions
@@ -72,10 +76,12 @@ import tuf.repository_lib as repo_lib
 import tuf.unittest_toolbox as unittest_toolbox
 import tuf.client.updater as updater
 
+from tests import utils
+
 import securesystemslib
 import six
 
-logger = logging.getLogger('tuf.test_updater')
+logger = logging.getLogger(__name__)
 repo_tool.disable_console_log_messages()
 
 
@@ -83,12 +89,15 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
   @classmethod
   def setUpClass(cls):
-    # setUpClass() is called before tests in an individual class are executed.
-
     # Create a temporary directory to store the repository, metadata, and target
     # files.  'temporary_directory' must be deleted in TearDownModule() so that
     # temporary files are always removed, even when exceptions occur.
     cls.temporary_directory = tempfile.mkdtemp(dir=os.getcwd())
+
+    # Needed because in some tests simple_server.py cannot be found.
+    # The reason is that the current working directory
+    # has been changed when executing a subprocess.
+    cls.SIMPLE_SERVER_PATH = os.path.join(os.getcwd(), 'simple_server.py')
 
     # Launch a SimpleHTTPServer (serves files in the current directory).
     # Test cases will request metadata and target files that have been
@@ -97,39 +106,18 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     # assume the pre-generated metadata files have a specific structure, such
     # as a delegated role 'targets/role1', three target files, five key files,
     # etc.
-    cls.SERVER_PORT = random.randint(30000, 45000)
-    command = ['python', '-m', 'tuf.scripts.simple_server', str(cls.SERVER_PORT)]
-    cls.server_process = subprocess.Popen(command, stderr=subprocess.PIPE)
-    logger.info('\n\tServer process started.')
-    logger.info('\tServer process id: '+str(cls.server_process.pid))
-    logger.info('\tServing on port: '+str(cls.SERVER_PORT))
-    cls.url = 'http://localhost:'+str(cls.SERVER_PORT) + os.path.sep
-
-    # NOTE: Following error is raised if a delay is not long enough to allow
-    # the server process to set up and start listening:
-    #     <urlopen error [Errno 111] Connection refused>
-    # or, on Windows:
-    #     Failed to establish a new connection: [Errno 111] Connection refused'
-    # While 0.3s has consistently worked on Travis and local builds, it led to
-    # occasional failures in AppVeyor builds, so increasing this to 2s, sadly.
-    time.sleep(2)
+    cls.server_process_handler = utils.TestServerProcess(log=logger,
+        server=cls.SIMPLE_SERVER_PATH)
 
 
 
   @classmethod
   def tearDownClass(cls):
-    # tearDownModule() is called after all the tests have run.
-    # http://docs.python.org/2/library/unittest.html#class-and-module-fixtures
-
-    # Kill the SimpleHTTPServer process.
-    if cls.server_process.returncode is None:
-      logger.info('\tServer process ' + str(cls.server_process.pid) + ' terminated.')
-      cls.server_process.kill()
+    # Cleans the resources and flush the logged lines (if any).
+    cls.server_process_handler.clean()
 
     # Remove the temporary repository directory, which should contain all the
-    # metadata, targets, and key files generated for the test cases.  sleep
-    # for a bit to allow the kill'd server process to terminate.
-    time.sleep(.3)
+    # metadata, targets, and key files generated for the test cases
     shutil.rmtree(cls.temporary_directory)
 
 
@@ -179,8 +167,8 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
     # 'path/to/tmp/repository' -> 'localhost:8001/tmp/repository'.
     repository_basepath = self.repository_directory[len(os.getcwd()):]
-    url_prefix = \
-      'http://localhost:' + str(self.SERVER_PORT) + repository_basepath
+    url_prefix = 'http://localhost:' \
+        + str(self.server_process_handler.port) + repository_basepath
 
     # Setting 'tuf.settings.repository_directory' with the temporary client
     # directory copied from the original repository files.
@@ -188,8 +176,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
     self.repository_mirrors = {'mirror1': {'url_prefix': url_prefix,
                                            'metadata_path': 'metadata',
-                                           'targets_path': 'targets',
-                                           'confined_target_dirs': ['']}}
+                                           'targets_path': 'targets'}}
 
     # Creating a repository instance.  The test cases will use this client
     # updater to refresh metadata, fetch target files, etc.
@@ -209,7 +196,8 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     tuf.roledb.clear_roledb(clear_all=True)
     tuf.keydb.clear_keydb(clear_all=True)
 
-
+    # Logs stdout and stderr from the sever subprocess.
+    self.server_process_handler.flush_log()
 
 
   # UNIT TESTS.
@@ -241,6 +229,9 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     # directory.
     tuf.settings.repositories_directory = self.client_directory
 
+    # Test: repository does not exist
+    self.assertRaises(tuf.exceptions.MissingLocalRepositoryError, updater.Updater,
+                      'test_non_existing_repository', self.repository_mirrors)
 
     # Test: empty client repository (i.e., no metadata directory).
     metadata_backup = self.client_metadata + '.backup'
@@ -354,7 +345,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     # 'targets.json' are also loaded when the repository object is
     # instantiated.
 
-    self.assertEqual(number_of_root_keys * 2 + 2, len(tuf.keydb._keydb_dict[self.repository_name]))
+    self.assertEqual(number_of_root_keys + 1, len(tuf.keydb._keydb_dict[self.repository_name]))
 
     # Test: normal case.
     self.repository_updater._rebuild_key_and_role_db()
@@ -365,7 +356,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     # _rebuild_key_and_role_db() will only rebuild the keys and roles specified
     # in the 'root.json' file, unlike __init__().  Instantiating an updater
     # object calls both _rebuild_key_and_role_db() and _import_delegations().
-    self.assertEqual(number_of_root_keys * 2, len(tuf.keydb._keydb_dict[self.repository_name]))
+    self.assertEqual(number_of_root_keys, len(tuf.keydb._keydb_dict[self.repository_name]))
 
     # Test: properly updated roledb and keydb dicts if the Root role changes.
     root_metadata = self.repository_updater.metadata['current']['root']
@@ -376,7 +367,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
     root_roleinfo = tuf.roledb.get_roleinfo('root', self.repository_name)
     self.assertEqual(root_roleinfo['threshold'], 8)
-    self.assertEqual(number_of_root_keys * 2 - 2, len(tuf.keydb._keydb_dict[self.repository_name]))
+    self.assertEqual(number_of_root_keys - 1, len(tuf.keydb._keydb_dict[self.repository_name]))
 
 
 
@@ -425,6 +416,55 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
 
 
+  def test_1__refresh_must_not_count_duplicate_keyids_towards_threshold(self):
+    # Update root threshold on the server repository and sign twice with 1 key
+    repository = repo_tool.load_repository(self.repository_directory)
+    repository.root.threshold = 2
+    repository.root.load_signing_key(self.role_keys['root']['private'])
+
+    storage_backend = securesystemslib.storage.FilesystemBackend()
+    # The client uses the threshold from the previous root file to verify the
+    # new root. Thus we need to make two updates so that the threshold used for
+    # verification becomes 2. I.e. we bump the version, sign twice with the
+    # same key and write to disk '2.root.json' and '3.root.json'.
+    for version in [2, 3]:
+      repository.root.version = version
+      info = tuf.roledb.get_roleinfo("root")
+      metadata = repo_lib.generate_root_metadata(
+          info["version"], info["expires"], False)
+      signed_metadata = repo_lib.sign_metadata(
+          metadata, info["keyids"], "root.json", "default")
+      signed_metadata["signatures"].append(signed_metadata["signatures"][0])
+      live_root_path = os.path.join(
+          self.repository_directory, "metadata", "root.json")
+
+      # Bypass server side verification in 'write' or 'writeall', which would
+      # catch the unmet threshold.
+      # We also skip writing to 'metadata.staged' and copying to 'metadata' and
+      # instead write directly to 'metadata'
+      repo_lib.write_metadata_file(signed_metadata, live_root_path,
+          info["version"], True, storage_backend)
+
+
+    # Update from current '1.root.json' to '3.root.json' on client and assert
+    # raise of 'BadSignatureError' (caused by unmet signature threshold).
+    try:
+      self.repository_updater.refresh()
+
+    except tuf.exceptions.NoWorkingMirrorError as e:
+      mirror_errors = list(e.mirror_errors.values())
+      self.assertTrue(len(mirror_errors) == 1)
+      self.assertTrue(
+          isinstance(mirror_errors[0],
+          securesystemslib.exceptions.BadSignatureError))
+      self.assertEqual(
+          str(mirror_errors[0]),
+          repr("root") + " metadata has bad signature.")
+
+    else:
+      self.fail(
+          "Expected a NoWorkingMirrorError composed of one BadSignatureError")
+
 
   def test_1__update_fileinfo(self):
       # Tests
@@ -440,7 +480,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
       self.assertTrue(tuf.formats.FILEDICT_SCHEMA.matches(fileinfo_dict))
       root_filepath = os.path.join(self.client_metadata_current, 'root.json')
       length, hashes = securesystemslib.util.get_file_details(root_filepath)
-      root_fileinfo = tuf.formats.make_fileinfo(length, hashes)
+      root_fileinfo = tuf.formats.make_targets_fileinfo(length, hashes)
       self.assertTrue('root.json' in fileinfo_dict)
       self.assertEqual(fileinfo_dict['root.json'], root_fileinfo)
 
@@ -461,18 +501,18 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
       #  Verify that the method returns 'False' if file info was not changed.
       root_filepath = os.path.join(self.client_metadata_current, 'root.json')
       length, hashes = securesystemslib.util.get_file_details(root_filepath)
-      root_fileinfo = tuf.formats.make_fileinfo(length, hashes)
+      root_fileinfo = tuf.formats.make_targets_fileinfo(length, hashes)
       self.assertFalse(self.repository_updater._fileinfo_has_changed('root.json',
                                                              root_fileinfo))
 
       # Verify that the method returns 'True' if length or hashes were changed.
       new_length = 8
-      new_root_fileinfo = tuf.formats.make_fileinfo(new_length, hashes)
+      new_root_fileinfo = tuf.formats.make_targets_fileinfo(new_length, hashes)
       self.assertTrue(self.repository_updater._fileinfo_has_changed('root.json',
                                                              new_root_fileinfo))
       # Hashes were changed.
       new_hashes = {'sha256': self.random_string()}
-      new_root_fileinfo = tuf.formats.make_fileinfo(length, new_hashes)
+      new_root_fileinfo = tuf.formats.make_targets_fileinfo(length, new_hashes)
       self.assertTrue(self.repository_updater._fileinfo_has_changed('root.json',
                                                              new_root_fileinfo))
 
@@ -513,7 +553,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
     # Take into account the number of keyids algorithms supported by default,
     # which this test condition expects to be two (sha256 and sha512).
-    self.assertEqual(4 * 2, len(tuf.keydb._keydb_dict[repository_name]))
+    self.assertEqual(4, len(tuf.keydb._keydb_dict[repository_name]))
 
     # Test: pass a role without delegations.
     self.repository_updater._import_delegations('root')
@@ -522,8 +562,8 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     # checking the number of elements in the dictionaries.
     self.assertEqual(len(tuf.roledb._roledb_dict[repository_name]), 4)
     # Take into account the number of keyid hash algorithms, which this
-    # test condition expects to be two (for sha256 and sha512).
-    self.assertEqual(len(tuf.keydb._keydb_dict[repository_name]), 4 * 2)
+    # test condition expects to be one
+    self.assertEqual(len(tuf.keydb._keydb_dict[repository_name]), 4)
 
     # Test: normal case, first level delegation.
     self.repository_updater._import_delegations('targets')
@@ -531,7 +571,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     self.assertEqual(len(tuf.roledb._roledb_dict[repository_name]), 5)
     # The number of root keys (times the number of key hash algorithms) +
     # delegation's key (+1 for its sha512 keyid).
-    self.assertEqual(len(tuf.keydb._keydb_dict[repository_name]), 4 * 2 + 2)
+    self.assertEqual(len(tuf.keydb._keydb_dict[repository_name]), 4 + 1)
 
     # Verify that roledb dictionary was added.
     self.assertTrue('role1' in tuf.roledb._roledb_dict[repository_name])
@@ -635,14 +675,31 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     root_metadata = self.repository_updater.metadata['current']['root']
     self.repository_updater._ensure_not_expired(root_metadata, 'root')
 
-    # 'tuf.exceptions.ExpiredMetadataError' should be raised in this next test condition,
-    # because the expiration_date has expired by 10 seconds.
+    # Metadata with an expiration time in the future should, of course, not
+    # count as expired
+    expires = tuf.formats.unix_timestamp_to_datetime(int(time.time() + 10))
+    expires = expires.isoformat() + 'Z'
+    root_metadata['expires'] = expires
+    self.assertTrue(tuf.formats.ROOT_SCHEMA.matches(root_metadata))
+    self.repository_updater._ensure_not_expired(root_metadata, 'root')
+
+    # Metadata that expires at the exact current time is considered expired
+    expire_time = int(time.time())
+    expires = \
+      tuf.formats.unix_timestamp_to_datetime(expire_time).isoformat()+'Z'
+    root_metadata['expires'] = expires
+    mock_time = mock.Mock()
+    mock_time.return_value = expire_time
+    self.assertTrue(tuf.formats.ROOT_SCHEMA.matches(root_metadata))
+    with mock.patch('time.time', mock_time):
+      self.assertRaises(tuf.exceptions.ExpiredMetadataError,
+                        self.repository_updater._ensure_not_expired,
+                        root_metadata, 'root')
+
+    # Metadata that expires in the past is considered expired
     expires = tuf.formats.unix_timestamp_to_datetime(int(time.time() - 10))
     expires = expires.isoformat() + 'Z'
     root_metadata['expires'] = expires
-
-    # Ensure the 'expires' value of the root file is valid by checking the
-    # the formats of the 'root.json' object.
     self.assertTrue(tuf.formats.ROOT_SCHEMA.matches(root_metadata))
     self.assertRaises(tuf.exceptions.ExpiredMetadataError,
                       self.repository_updater._ensure_not_expired,
@@ -662,7 +719,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     # because it has no signed metadata for itself.
     DEFAULT_TIMESTAMP_FILELENGTH = tuf.settings.DEFAULT_TIMESTAMP_REQUIRED_LENGTH
 
-    # This is the the upper bound length for Targets metadata.
+    # This is the upper bound length for Targets metadata.
     DEFAULT_TARGETS_FILELENGTH = tuf.settings.DEFAULT_TARGETS_REQUIRED_LENGTH
 
     # Save the versioninfo of 'targets.json,' needed later when re-installing
@@ -719,11 +776,15 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
     except tuf.exceptions.NoWorkingMirrorError as e:
       for mirror_error in six.itervalues(e.mirror_errors):
-        assert isinstance(mirror_error, securesystemslib.exceptions.BadVersionNumberError)
+        assert isinstance(mirror_error, tuf.exceptions.BadVersionNumberError)
+
+    else:
+      self.fail(
+          'Expected a NoWorkingMirrorError composed of BadVersionNumberErrors')
 
     # Verify that the specific exception raised is correct for the previous
     # case.  The version number is checked, so the specific error in
-    # this case should be 'securesystemslib.exceptions.BadVersionNumberError'.
+    # this case should be 'tuf.exceptions.BadVersionNumberError'.
     try:
       self.repository_updater._update_metadata('targets',
                                                DEFAULT_TARGETS_FILELENGTH,
@@ -731,7 +792,11 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
     except tuf.exceptions.NoWorkingMirrorError as e:
       for mirror_error in six.itervalues(e.mirror_errors):
-        assert isinstance(mirror_error, securesystemslib.exceptions.BadVersionNumberError)
+        assert isinstance(mirror_error, tuf.exceptions.BadVersionNumberError)
+
+    else:
+      self.fail(
+          'Expected a NoWorkingMirrorError composed of BadVersionNumberErrors')
 
 
 
@@ -739,8 +804,16 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
   def test_3__get_metadata_file(self):
 
-    valid_tuf_version = tuf.formats.TUF_VERSION_NUMBER
-    tuf.formats.TUF_VERSION_NUMBER = '2'
+    '''
+    This test focuses on making sure that the updater rejects unknown or
+    badly-formatted TUF specification version numbers....
+    '''
+
+    # Make note of the correct supported TUF specification version.
+    correct_specification_version = tuf.SPECIFICATION_VERSION
+
+    # Change it long enough to write new metadata.
+    tuf.SPECIFICATION_VERSION = '0.9.0'
 
     repository = repo_tool.load_repository(self.repository_directory)
     repository.timestamp.load_signing_key(self.role_keys['timestamp']['private'])
@@ -750,6 +823,12 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     shutil.rmtree(os.path.join(self.repository_directory, 'metadata'))
     shutil.copytree(os.path.join(self.repository_directory, 'metadata.staged'),
                     os.path.join(self.repository_directory, 'metadata'))
+
+
+    # Change the supported TUF specification version back to what it should be
+    # so that we can parse the metadata and see that the spec version in the
+    # metadata does not match the code's expected spec version.
+    tuf.SPECIFICATION_VERSION = correct_specification_version
 
     upperbound_filelength = tuf.settings.DEFAULT_TIMESTAMP_REQUIRED_LENGTH
     try:
@@ -757,31 +836,18 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
       upperbound_filelength, 1)
 
     except tuf.exceptions.NoWorkingMirrorError as e:
+      # Note that this test provides a piece of metadata which would fail to
+      # be accepted -- with a different error -- if the specification version
+      # number were not a problem.
       for mirror_error in six.itervalues(e.mirror_errors):
-        assert isinstance(mirror_error, securesystemslib.exceptions.BadVersionNumberError)
+        assert isinstance(
+            mirror_error, tuf.exceptions.UnsupportedSpecificationError)
 
-    # Test for an improperly formatted TUF version number.
-    tuf.formats.TUF_VERSION_NUMBER = 'BAD'
-    repository = repo_tool.load_repository(self.repository_directory)
-    repository.timestamp.load_signing_key(self.role_keys['timestamp']['private'])
-    repository.writeall()
-
-    # Move the staged metadata to the "live" metadata.
-    shutil.rmtree(os.path.join(self.repository_directory, 'metadata'))
-    shutil.copytree(os.path.join(self.repository_directory, 'metadata.staged'),
-                    os.path.join(self.repository_directory, 'metadata'))
-
-    try:
-      self.repository_updater._get_metadata_file('timestamp', 'timestamp.json',
-      upperbound_filelength, 1)
-
-    except tuf.exceptions.NoWorkingMirrorError as e:
-      for mirror_error in six.itervalues(e.mirror_errors):
-        assert isinstance(mirror_error, securesystemslib.exceptions.FormatError)
-
-    # Reset the TUF_VERSION_NUMBER so that subsequent unit tests use the
-    # expected value.
-    tuf.formats.TUF_VERSION_NUMBER = valid_tuf_version
+    else:
+      self.fail(
+          'Expected a failure to verify metadata when the metadata had a '
+          'specification version number that was unexpected.  '
+          'No error was raised.')
 
 
 
@@ -807,7 +873,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
     # Modify one target file on the remote repository.
     repository = repo_tool.load_repository(self.repository_directory)
-    target3 = os.path.join(self.repository_directory, 'targets', 'file3.txt')
+    target3 = 'file3.txt'
 
     repository.targets.add_target(target3)
     repository.root.version = repository.root.version + 1
@@ -830,7 +896,6 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     self.repository_updater._update_metadata('timestamp', DEFAULT_TIMESTAMP_FILELENGTH)
     self.repository_updater._update_metadata_if_changed('snapshot', 'timestamp')
     self.repository_updater._update_metadata_if_changed('targets')
-    self.repository_updater._update_metadata_if_changed('root')
     targets_path = os.path.join(self.client_metadata_current, 'targets.json')
     self.assertTrue(os.path.exists(targets_path))
     self.assertTrue(self.repository_updater.metadata['current']['targets'])
@@ -873,7 +938,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     self.repository_updater.refresh()
 
     # Second, verify that expired root metadata is not updated if
-    # 'unsafely_update_root_if_necessary' is explictly set to 'False'.
+    # 'unsafely_update_root_if_necessary' is explicitly set to 'False'.
     expired_date = '1960-01-01T12:00:00Z'
     self.repository_updater.metadata['current']['root']['expires'] = expired_date
     self.assertRaises(tuf.exceptions.ExpiredMetadataError,
@@ -881,7 +946,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
                       unsafely_update_root_if_necessary=False)
 
     repository = repo_tool.load_repository(self.repository_directory)
-    target3 = os.path.join(self.repository_directory, 'targets', 'file3.txt')
+    target3 = 'file3.txt'
 
     repository.targets.add_target(target3)
     repository.targets.load_signing_key(self.role_keys['targets']['private'])
@@ -914,8 +979,6 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
     # Verify that the client's metadata was updated.
     targets_metadata = self.repository_updater.metadata['current']['targets']
-    targets_directory = os.path.join(self.repository_directory, 'targets')
-    target3 = target3[len(targets_directory) + 1:]
     self.assertTrue(target3 in targets_metadata['targets'])
 
     # Verify the expected version numbers of the updated roles.
@@ -962,7 +1025,8 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
    self.repository_updater.refresh()
 
    # Test: normal case.
-   all_targets = self.repository_updater.all_targets()
+   with utils.ignore_deprecation_warnings('tuf.client.updater'):
+    all_targets = self.repository_updater.all_targets()
 
    # Verify format of 'all_targets', it should correspond to
    # 'TARGETINFOS_SCHEMA'.
@@ -1006,7 +1070,8 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
 
     # Test: normal case.
-    targetinfos = self.repository_updater.targets_of_role('role1')
+    with utils.ignore_deprecation_warnings('tuf.client.updater'):
+      targetinfos = self.repository_updater.targets_of_role('role1')
 
     # Verify that the expected role files were downloaded and installed.
     os.path.exists(os.path.join(self.client_metadata_current, 'targets.json'))
@@ -1023,10 +1088,11 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
     # Test: Invalid arguments.
     # targets_of_role() expected a string rolename.
-    self.assertRaises(securesystemslib.exceptions.FormatError, self.repository_updater.targets_of_role,
-                      8)
-    self.assertRaises(tuf.exceptions.UnknownRoleError, self.repository_updater.targets_of_role,
-                      'unknown_rolename')
+    with utils.ignore_deprecation_warnings('tuf.client.updater'):
+      self.assertRaises(securesystemslib.exceptions.FormatError, self.repository_updater.targets_of_role,
+                        8)
+      self.assertRaises(tuf.exceptions.UnknownRoleError, self.repository_updater.targets_of_role,
+                        'unknown_rolename')
 
 
 
@@ -1037,26 +1103,18 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     # Unlike some of the other tests, start up a fresh server here.
     # The SimpleHTTPServer started in the setupclass has a tendency to
     # timeout in Windows after a few tests.
-    SERVER_PORT = random.randint(30000, 45000)
-    command = ['python', '-m', 'tuf.scripts.simple_server', str(SERVER_PORT)]
-    server_process = subprocess.Popen(command, stderr=subprocess.PIPE)
 
-    # NOTE: Following error is raised if a delay is not long enough:
-    # <urlopen error [Errno 111] Connection refused>
-    # or, on Windows:
-    # Failed to establish a new connection: [Errno 111] Connection refused'
-    # While 0.3s has consistently worked on Travis and local builds, it led to
-    # occasional failures in AppVeyor builds, so increasing this to 2s, sadly.
-    time.sleep(2)
+    # Creates a subprocess running a server.
+    server_process_handler = utils.TestServerProcess(log=logger,
+        server=self.SIMPLE_SERVER_PATH)
 
     # 'path/to/tmp/repository' -> 'localhost:8001/tmp/repository'.
     repository_basepath = self.repository_directory[len(os.getcwd()):]
-    url_prefix = \
-      'http://localhost:' + str(SERVER_PORT) + repository_basepath
+    url_prefix = 'http://localhost:' \
+        + str(self.server_process_handler.port) + repository_basepath
 
     self.repository_mirrors = {'mirror1': {'url_prefix': url_prefix,
-        'metadata_path': 'metadata', 'targets_path': 'targets',
-        'confined_target_dirs': ['']}}
+        'metadata_path': 'metadata', 'targets_path': 'targets'}}
 
     # Creating a repository instance.  The test cases will use this client
     # updater to refresh metadata, fetch target files, etc.
@@ -1087,12 +1145,13 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     # Test updater.get_one_valid_targetinfo() backtracking behavior (enabled by
     # default.)
     targets_directory = os.path.join(self.repository_directory, 'targets')
-    foo_directory = os.path.join(targets_directory, 'foo')
-    foo_pattern = 'foo/foo*.tar.gz'
-    os.makedirs(foo_directory)
+    os.makedirs(os.path.join(targets_directory, 'foo'))
 
-    foo_package = os.path.join(foo_directory, 'foo1.1.tar.gz')
-    with open(foo_package, 'wb') as file_object:
+    foo_package = 'foo/foo1.1.tar.gz'
+    foo_pattern = 'foo/foo*.tar.gz'
+
+    foo_fullpath = os.path.join(targets_directory, foo_package)
+    with open(foo_fullpath, 'wb') as file_object:
       file_object.write(b'new release')
 
     # Modify delegations on the remote repository to test backtracking behavior.
@@ -1169,7 +1228,8 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
         self.repository_updater.get_one_valid_targetinfo,
         '/foo/foo1.1.tar.gz')
 
-    server_process.kill()
+    # Cleans the resources and flush the logged lines (if any).
+    server_process_handler.clean()
 
 
 
@@ -1199,7 +1259,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     length, hashes = \
       securesystemslib.util.get_file_details(download_filepath,
         securesystemslib.settings.HASH_ALGORITHMS)
-    download_targetfileinfo = tuf.formats.make_fileinfo(length, hashes)
+    download_targetfileinfo = tuf.formats.make_targets_fileinfo(length, hashes)
 
     # Add any 'custom' data from the repository's target fileinfo to the
     # 'download_targetfileinfo' object being tested.
@@ -1242,6 +1302,39 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     self.repository_updater.download_target(targetinfo2,
                                             destination_directory)
 
+    # Checks if the file has been successfully downloaded
+    download_filepath = os.path.join(destination_directory, target_filepath2)
+    self.assertTrue(os.path.exists(download_filepath))
+
+    # Removes the file so that it can be downloaded again in the next test
+    os.remove(download_filepath)
+
+    # Test downloading with consistent snapshot enabled, but without adding
+    # the hash of the file as a prefix to its name.
+
+    file1_path = targetinfo2['filepath']
+    file1_hashes = securesystemslib.util.get_file_hashes(
+        os.path.join(self.repository_directory, 'targets', file1_path),
+        hash_algorithms=['sha256', 'sha512'])
+
+    # Currently in the repository directory, those three files exists:
+    # "file1.txt", "<sha256_hash>.file1.txt" and "<sha512_hash>.file1.txt"
+    # where both sha256 and sha512 hashes are for file file1.txt.
+    # Remove the files with the hash digest prefix to ensure that
+    # the served target file is not prefixed.
+    os.remove(os.path.join(self.repository_directory, 'targets',
+        file1_hashes['sha256'] + '.' + file1_path))
+    os.remove(os.path.join(self.repository_directory, 'targets',
+        file1_hashes['sha512'] + '.' + file1_path))
+
+
+    self.repository_updater.download_target(targetinfo2,
+                                            destination_directory,
+                                            prefix_filename_with_hash=False)
+
+    # Checks if the file has been successfully downloaded
+    self.assertTrue(os.path.exists(download_filepath))
+
     # Test for a destination that cannot be written to (apart from a target
     # file that already exists at the destination) and which raises an
     # exception.
@@ -1251,7 +1344,13 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
       self.repository_updater.download_target(targetinfo, bad_destination_directory)
 
     except OSError as e:
-      self.assertTrue(e.errno == errno.ENAMETOOLONG or e.errno == errno.ENOENT)
+      self.assertTrue(
+          e.errno in [errno.ENAMETOOLONG, errno.ENOENT, errno.EINVAL],
+          "wrong errno: " + str(e.errno))
+
+    else:
+      self.fail('No OSError raised')
+
 
     # Test: Invalid arguments.
     self.assertRaises(securesystemslib.exceptions.FormatError,
@@ -1282,6 +1381,12 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
       # which does not generate specific exception errors.
       self.assertEqual(len(exception.mirror_errors), 0)
 
+    else:
+      self.fail(
+          'Expected a NoWorkingMirrorError with zero mirror errors in it.')
+
+
+
 
 
   def test_7_updated_targets(self):
@@ -1294,31 +1399,22 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     # Unlike some of the other tests, start up a fresh server here.
     # The SimpleHTTPServer started in the setupclass has a tendency to
     # timeout in Windows after a few tests.
-    SERVER_PORT = random.randint(30000, 45000)
-    command = ['python', '-m', 'tuf.scripts.simple_server', str(SERVER_PORT)]
-    server_process = subprocess.Popen(command, stderr=subprocess.PIPE)
 
-    # NOTE: Following error is raised if a delay is not long enough to allow
-    # the server process to set up and start listening:
-    #     <urlopen error [Errno 111] Connection refused>
-    # or, on Windows:
-    #     Failed to establish a new connection: [Errno 111] Connection refused'
-    # While 0.3s has consistently worked on Travis and local builds, it led to
-    # occasional failures in AppVeyor builds, so increasing this to 2s, sadly.
-    time.sleep(2)
+    # Creates a subprocess running a server.
+    server_process_handler = utils.TestServerProcess(log=logger,
+        server=self.SIMPLE_SERVER_PATH)
 
     # 'path/to/tmp/repository' -> 'localhost:8001/tmp/repository'.
     repository_basepath = self.repository_directory[len(os.getcwd()):]
-    url_prefix = \
-      'http://localhost:' + str(SERVER_PORT) + repository_basepath
+    url_prefix = 'http://localhost:' \
+        + str(self.server_process_handler.port) + repository_basepath
 
     # Setting 'tuf.settings.repository_directory' with the temporary client
     # directory copied from the original repository files.
     tuf.settings.repositories_directory = self.client_directory
 
     self.repository_mirrors = {'mirror1': {'url_prefix': url_prefix,
-        'metadata_path': 'metadata', 'targets_path': 'targets',
-        'confined_target_dirs': ['']}}
+        'metadata_path': 'metadata', 'targets_path': 'targets'}}
 
     # Creating a repository instance.  The test cases will use this client
     # updater to refresh metadata, fetch target files, etc.
@@ -1330,7 +1426,8 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
     # Get the list of target files.  It will be used as an argument to the
     # 'updated_targets()' function.
-    all_targets = self.repository_updater.all_targets()
+    with utils.ignore_deprecation_warnings('tuf.client.updater'):
+      all_targets = self.repository_updater.all_targets()
 
     # Test for duplicates and targets in the root directory of the repository.
     additional_target = all_targets[0].copy()
@@ -1344,7 +1441,8 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     updated_targets = \
       self.repository_updater.updated_targets(all_targets, destination_directory)
 
-    all_targets = self.repository_updater.all_targets()
+    with utils.ignore_deprecation_warnings('tuf.client.updater'):
+      all_targets = self.repository_updater.all_targets()
 
     # Assumed the pre-generated repository specifies two target files in
     # 'targets.json' and one delegated target file in 'role1.json'.
@@ -1387,7 +1485,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
     length, hashes = securesystemslib.util.get_file_details(target1)
 
-    repository.targets.add_target(target1)
+    repository.targets.add_target(os.path.basename(target1))
     repository.targets.load_signing_key(self.role_keys['targets']['private'])
     repository.snapshot.load_signing_key(self.role_keys['snapshot']['private'])
 
@@ -1396,7 +1494,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
     length, hashes = securesystemslib.util.get_file_details(target1)
 
-    repository.targets.add_target(target1)
+    repository.targets.add_target(os.path.basename(target1))
     repository.targets.load_signing_key(self.role_keys['targets']['private'])
     repository.snapshot.load_signing_key(self.role_keys['snapshot']['private'])
     repository.timestamp.load_signing_key(self.role_keys['timestamp']['private'])
@@ -1411,12 +1509,14 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     self.repository_updater.refresh()
 
     # Verify that the new target file is considered updated.
-    all_targets = self.repository_updater.all_targets()
+    with utils.ignore_deprecation_warnings('tuf.client.updater'):
+      all_targets = self.repository_updater.all_targets()
     updated_targets = \
       self.repository_updater.updated_targets(all_targets, destination_directory)
     self.assertEqual(len(updated_targets), 1)
 
-    server_process.kill()
+    # Cleans the resources and flush the logged lines (if any).
+    server_process_handler.clean()
 
 
 
@@ -1426,31 +1526,22 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     # Unlike some of the other tests, start up a fresh server here.
     # The SimpleHTTPServer started in the setupclass has a tendency to
     # timeout in Windows after a few tests.
-    SERVER_PORT = random.randint(30000, 45000)
-    command = ['python', '-m', 'tuf.scripts.simple_server', str(SERVER_PORT)]
-    server_process = subprocess.Popen(command, stderr=subprocess.PIPE)
 
-    # NOTE: Following error is raised if a delay is not long enough to allow
-    # the server process to set up and start listening:
-    #     <urlopen error [Errno 111] Connection refused>
-    # or, on Windows:
-    #     Failed to establish a new connection: [Errno 111] Connection refused'
-    # While 0.3s has consistently worked on Travis and local builds, it led to
-    # occasional failures in AppVeyor builds, so increasing this to 2s, sadly.
-    time.sleep(2)
+    # Creates a subprocess running a server.
+    server_process_handler = utils.TestServerProcess(log=logger,
+        server=self.SIMPLE_SERVER_PATH)
 
     # 'path/to/tmp/repository' -> 'localhost:8001/tmp/repository'.
     repository_basepath = self.repository_directory[len(os.getcwd()):]
-    url_prefix = \
-      'http://localhost:' + str(SERVER_PORT) + repository_basepath
+    url_prefix = 'http://localhost:' \
+        + str(self.server_process_handler.port) + repository_basepath
 
     # Setting 'tuf.settings.repository_directory' with the temporary client
     # directory copied from the original repository files.
     tuf.settings.repositories_directory = self.client_directory
 
     self.repository_mirrors = {'mirror1': {'url_prefix': url_prefix,
-        'metadata_path': 'metadata', 'targets_path': 'targets',
-        'confined_target_dirs': ['']}}
+        'metadata_path': 'metadata', 'targets_path': 'targets'}}
 
     # Creating a repository instance.  The test cases will use this client
     # updater to refresh metadata, fetch target files, etc.
@@ -1461,7 +1552,8 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     destination_directory = self.make_temp_directory()
 
     #  Populate 'destination_direction' with all target files.
-    all_targets = self.repository_updater.all_targets()
+    with utils.ignore_deprecation_warnings('tuf.client.updater'):
+      all_targets = self.repository_updater.all_targets()
 
     self.assertEqual(len(os.listdir(destination_directory)), 0)
 
@@ -1492,7 +1584,8 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     # Verify number of target files in 'destination_directory' (should be 1
     # after the update made to the remote repository), and call
     # 'remove_obsolete_targets()'.
-    all_targets = self.repository_updater.all_targets()
+    with utils.ignore_deprecation_warnings('tuf.client.updater'):
+      all_targets = self.repository_updater.all_targets()
 
     updated_targets = \
       self.repository_updater.updated_targets(all_targets,
@@ -1525,7 +1618,8 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
     del self.repository_updater.metadata['previous']['targets']
     self.repository_updater.remove_obsolete_targets(destination_directory)
 
-    server_process.kill()
+    # Cleans the resources and flush the logged lines (if any).
+    server_process_handler.clean()
 
 
 
@@ -1537,7 +1631,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
       '/Jalape\xc3\xb1o': '78bfd5c314680545eb48ecad508aceb861f8d6e680f4fe1b791da45c298cda88'
     }
     for filepath, target_hash in six.iteritems(expected_target_hashes):
-      self.assertTrue(securesystemslib.formats.RELPATH_SCHEMA.matches(filepath))
+      self.assertTrue(tuf.formats.RELPATH_SCHEMA.matches(filepath))
       self.assertTrue(securesystemslib.formats.HASH_SCHEMA.matches(target_hash))
       self.assertEqual(self.repository_updater._get_target_hash(filepath), target_hash)
 
@@ -1547,34 +1641,15 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
 
 
-  def test_10__hard_check_file_length(self):
+  def test_10__check_file_length(self):
     # Test for exception if file object is not equal to trusted file length.
-    temp_file_object = securesystemslib.util.TempFile()
-    temp_file_object.write(b'X')
-    temp_file_object.seek(0)
-    self.assertRaises(tuf.exceptions.DownloadLengthMismatchError,
-                     self.repository_updater._hard_check_file_length,
-                     temp_file_object, 10)
+    with tempfile.TemporaryFile() as temp_file_object:
+      temp_file_object.write(b'X')
+      temp_file_object.seek(0)
+      self.assertRaises(tuf.exceptions.DownloadLengthMismatchError,
+                      self.repository_updater._check_file_length,
+                      temp_file_object, 10)
 
-
-
-
-
-  def test_10__soft_check_file_length(self):
-    # Test for exception if file object is not equal to trusted file length.
-    temp_file_object = securesystemslib.util.TempFile()
-    temp_file_object.write(b'XXX')
-    temp_file_object.seek(0)
-    self.assertRaises(tuf.exceptions.DownloadLengthMismatchError,
-                     self.repository_updater._soft_check_file_length,
-                     temp_file_object, 1)
-
-    # Verify that an exception is not raised if the file length <= the observed
-    # file length.
-    temp_file_object.seek(0)
-    self.repository_updater._soft_check_file_length(temp_file_object, 3)
-    temp_file_object.seek(0)
-    self.repository_updater._soft_check_file_length(temp_file_object, 4)
 
 
 
@@ -1598,7 +1673,7 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
   def test_10__preorder_depth_first_walk(self):
 
-    # Test that infinit loop is prevented if the target file is not found and
+    # Test that infinite loop is prevented if the target file is not found and
     # the max number of delegations is reached.
     valid_max_number_of_delegations = tuf.settings.MAX_NUMBER_OF_DELEGATIONS
     tuf.settings.MAX_NUMBER_OF_DELEGATIONS = 0
@@ -1683,58 +1758,18 @@ class TestUpdater(unittest_toolbox.Modified_TestCase):
 
 
 
-  def test_11__verify_uncompressed_metadata_file(self):
+  def test_11__verify_metadata_file(self):
     # Test for invalid metadata content.
-    metadata_file_object = securesystemslib.util.TempFile()
-    metadata_file_object.write(b'X')
-    metadata_file_object.seek(0)
+    with tempfile.TemporaryFile() as metadata_file_object:
+      metadata_file_object.write(b'X')
+      metadata_file_object.seek(0)
 
-    self.assertRaises(tuf.exceptions.InvalidMetadataJSONError,
-        self.repository_updater._verify_uncompressed_metadata_file,
-        metadata_file_object, 'root')
-
-
-
-  def test_12__verify_root_chain_link(self):
-    # Test for an invalid signature in the chain link.
-    # current = (i.e., 1.root.json)
-    # next = signable for the next metadata in the chain (i.e., 2.root.json)
-    rolename = 'root'
-    current_root = self.repository_updater.metadata['current']['root']
-
-    targets_path = os.path.join(self.repository_directory, 'metadata', 'targets.json')
-
-    # 'next_invalid_root' is a Targets signable, as written to disk.
-    # We use the Targets metadata here to ensure the signatures are invalid.
-    next_invalid_root = securesystemslib.util.load_json_file(targets_path)
-
-    self.assertRaises(securesystemslib.exceptions.BadSignatureError,
-        self.repository_updater._verify_root_chain_link, rolename, current_root,
-        next_invalid_root)
+      self.assertRaises(tuf.exceptions.InvalidMetadataJSONError,
+          self.repository_updater._verify_metadata_file,
+          metadata_file_object, 'root')
 
 
-
-  def test_13__get_file(self):
-    # Test for an "unsafe" download, where the file is downloaded up to
-    # a required length (and no more).  The "safe" download approach
-    # downloads an exact required length.
-    targets_path = os.path.join(self.repository_directory, 'metadata', 'targets.json')
-
-    file_size, file_hashes = securesystemslib.util.get_file_details(targets_path)
-    file_type = 'meta'
-
-    def verify_target_file(targets_path):
-      # Every target file must have its length and hashes inspected.
-      self.repository_updater._hard_check_file_length(targets_path, file_size)
-      self.repository_updater._check_hashes(targets_path, file_hashes)
-
-    self.repository_updater._get_file('targets.json', verify_target_file,
-        file_type, file_size, download_safely=True)
-
-    self.repository_updater._get_file('targets.json', verify_target_file,
-        file_type, file_size, download_safely=False)
-
-  def test_14__targets_of_role(self):
+  def test_13__targets_of_role(self):
     # Test case where a list of targets is given.  By default, the 'targets'
     # parameter is None.
     targets = [{'filepath': 'file1.txt', 'fileinfo': {'length': 1, 'hashes': {'sha256': 'abc'}}}]
@@ -1759,6 +1794,11 @@ class TestMultiRepoUpdater(unittest_toolbox.Modified_TestCase):
 
     self.temporary_repository_root = self.make_temp_directory(directory=
         self.temporary_directory)
+
+    # Needed because in some tests simple_server.py cannot be found.
+    # The reason is that the current working directory
+    # has been changed when executing a subprocess.
+    self.SIMPLE_SERVER_PATH = os.path.join(os.getcwd(), 'simple_server.py')
 
     # The original repository, keystore, and client directories will be copied
     # for each test case.
@@ -1808,47 +1848,42 @@ class TestMultiRepoUpdater(unittest_toolbox.Modified_TestCase):
     # the pre-generated metadata files have a specific structure, such
     # as a delegated role 'targets/role1', three target files, five key files,
     # etc.
-    self.SERVER_PORT = 30001
-    self.SERVER_PORT2 = 30002
 
-    command = ['python', '-m', 'tuf.scripts.simple_server', str(self.SERVER_PORT)]
-    command2 = ['python', '-m', 'tuf.scripts.simple_server', str(self.SERVER_PORT2)]
-
-    self.server_process = subprocess.Popen(command, stderr=subprocess.PIPE,
-        cwd=self.repository_directory)
+    # Creates a subprocess running a server.
+    self.server_process_handler = utils.TestServerProcess(log=logger,
+        server=self.SIMPLE_SERVER_PATH, popen_cwd=self.repository_directory)
 
     logger.debug('Server process started.')
-    logger.debug('Server process id: ' + str(self.server_process.pid))
-    logger.debug('Serving on port: ' + str(self.SERVER_PORT))
 
-    self.server_process2 = subprocess.Popen(command2, stderr=subprocess.PIPE,
-        cwd=self.repository_directory2)
+    # Creates a subprocess running a server.
+    self.server_process_handler2 = utils.TestServerProcess(log=logger,
+        server=self.SIMPLE_SERVER_PATH, popen_cwd=self.repository_directory2)
 
     logger.debug('Server process 2 started.')
-    logger.debug('Server 2 process id: ' + str(self.server_process2.pid))
-    logger.debug('Serving 2 on port: ' + str(self.SERVER_PORT2))
-    self.url = 'http://localhost:' + str(self.SERVER_PORT) + os.path.sep
-    self.url2 = 'http://localhost:' + str(self.SERVER_PORT2) + os.path.sep
 
-    # NOTE: Following error is raised if a delay is not long enough to allow
-    # the server process to set up and start listening:
-    #     <urlopen error [Errno 111] Connection refused>
-    # or, on Windows:
-    #     Failed to establish a new connection: [Errno 111] Connection refused'
-    # While 0.3s has consistently worked on Travis and local builds, it led to
-    # occasional failures in AppVeyor builds, so increasing this to 2s, sadly.
-    time.sleep(2)
+    url_prefix = 'http://localhost:' + str(self.server_process_handler.port)
+    url_prefix2 = 'http://localhost:' + str(self.server_process_handler2.port)
 
-    url_prefix = 'http://localhost:' + str(self.SERVER_PORT)
-    url_prefix2 = 'http://localhost:' + str(self.SERVER_PORT2)
+    # We have all of the necessary information for two repository mirrors
+    # in map.json, except for url prefixes.
+    # For the url prefixes, we create subprocesses that run a server script.
+    # In server scripts we get a free port from the OS which is sent
+    # back to the parent process.
+    # That's why we dynamically add the ports to the url prefixes
+    # and changing the content of map.json.
+    self.map_file_path = os.path.join(self.client_directory, 'map.json')
+    data = securesystemslib.util.load_json_file(self.map_file_path)
+
+    data['repositories']['test_repository1'] = [url_prefix]
+    data['repositories']['test_repository2'] = [url_prefix2]
+    with open(self.map_file_path, 'w') as f:
+      json.dump(data, f)
 
     self.repository_mirrors = {'mirror1': {'url_prefix': url_prefix,
-        'metadata_path': 'metadata', 'targets_path': 'targets',
-        'confined_target_dirs': ['']}}
+        'metadata_path': 'metadata', 'targets_path': 'targets'}}
 
     self.repository_mirrors2 = {'mirror1': {'url_prefix': url_prefix2,
-        'metadata_path': 'metadata', 'targets_path': 'targets',
-        'confined_target_dirs': ['']}}
+        'metadata_path': 'metadata', 'targets_path': 'targets'}}
 
     # Create the repository instances.  The test cases will use these client
     # updaters to refresh metadata, fetch target files, etc.
@@ -1873,23 +1908,16 @@ class TestMultiRepoUpdater(unittest_toolbox.Modified_TestCase):
     # directories that may have been created during each test case.
     unittest_toolbox.Modified_TestCase.tearDown(self)
 
-    # Kill the SimpleHTTPServer process.
-    if self.server_process.returncode is None:
-      logger.info('Server process ' + str(self.server_process.pid) + ' terminated.')
-      self.server_process.kill()
-
-    if self.server_process2.returncode is None:
-      logger.info('Server 2 process ' + str(self.server_process2.pid) + ' terminated.')
-      self.server_process2.kill()
+    # Cleans the resources and flush the logged lines (if any).
+    self.server_process_handler.clean()
+    self.server_process_handler2.clean()
 
     # updater.Updater() populates the roledb with the name "test_repository1"
     tuf.roledb.clear_roledb(clear_all=True)
     tuf.keydb.clear_keydb(clear_all=True)
 
     # Remove the temporary repository directory, which should contain all the
-    # metadata, targets, and key files generated of all the test cases.  sleep
-    # for a bit to allow the kill'd server processes to terminate.
-    time.sleep(.3)
+    # metadata, targets, and key files generated of all the test cases
     shutil.rmtree(self.temporary_directory)
 
 
@@ -1922,14 +1950,12 @@ class TestMultiRepoUpdater(unittest_toolbox.Modified_TestCase):
         updater.MultiRepoUpdater, root_filepath)
 
     # Test for a valid instantiation.
-    map_file = os.path.join(self.client_directory, 'map.json')
-    multi_repo_updater = updater.MultiRepoUpdater(map_file)
+    multi_repo_updater = updater.MultiRepoUpdater(self.map_file_path)
 
 
 
   def test__target_matches_path_pattern(self):
-    map_file = os.path.join(self.client_directory, 'map.json')
-    multi_repo_updater = updater.MultiRepoUpdater(map_file)
+    multi_repo_updater = updater.MultiRepoUpdater(self.map_file_path)
     paths = ['foo*.tgz', 'bar*.tgz', 'file1.txt']
     self.assertTrue(
         multi_repo_updater._target_matches_path_pattern('bar-1.0.tgz', paths))
@@ -1941,8 +1967,7 @@ class TestMultiRepoUpdater(unittest_toolbox.Modified_TestCase):
 
 
   def test_get_valid_targetinfo(self):
-    map_file = os.path.join(self.client_directory, 'map.json')
-    multi_repo_updater = updater.MultiRepoUpdater(map_file)
+    multi_repo_updater = updater.MultiRepoUpdater(self.map_file_path)
 
     # Verify the multi repo updater refuses to save targetinfo if
     # required local repositories are missing.
@@ -2000,7 +2025,7 @@ class TestMultiRepoUpdater(unittest_toolbox.Modified_TestCase):
     repository.targets.remove_target(os.path.basename(target1))
 
     custom_field = {"custom": "my_custom_data"}
-    repository.targets.add_target(target1, custom_field)
+    repository.targets.add_target(os.path.basename(target1), custom_field)
     repository.targets.load_signing_key(self.role_keys['targets']['private'])
     repository.snapshot.load_signing_key(self.role_keys['snapshot']['private'])
     repository.timestamp.load_signing_key(self.role_keys['timestamp']['private'])
@@ -2026,7 +2051,7 @@ class TestMultiRepoUpdater(unittest_toolbox.Modified_TestCase):
 
     repository.targets.remove_target(os.path.basename(target1))
 
-    repository.targets.add_target(target1)
+    repository.targets.add_target(os.path.basename(target1))
     repository.targets.load_signing_key(self.role_keys['targets']['private'])
     repository.snapshot.load_signing_key(self.role_keys['snapshot']['private'])
     repository.timestamp.load_signing_key(self.role_keys['timestamp']['private'])
@@ -2049,8 +2074,7 @@ class TestMultiRepoUpdater(unittest_toolbox.Modified_TestCase):
 
 
   def test_get_updater(self):
-    map_file = os.path.join(self.client_directory, 'map.json')
-    multi_repo_updater = updater.MultiRepoUpdater(map_file)
+    multi_repo_updater = updater.MultiRepoUpdater(self.map_file_path)
 
     # Test for a non-existent repository name.
     self.assertEqual(None, multi_repo_updater.get_updater('bad_repo_name'))
@@ -2120,4 +2144,5 @@ def _load_role_keys(keystore_directory):
 
 
 if __name__ == '__main__':
+  utils.configure_test_logging(sys.argv)
   unittest.main()

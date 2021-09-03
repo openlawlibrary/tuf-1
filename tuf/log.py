@@ -113,8 +113,12 @@ console_handler = None
 file_handler = None
 
 # Set the logger and its settings.
+# Note: we're configuring the top-level hierarchy for the tuf package,
+# therefore we explicitly request the 'tuf' logger, rather than following
+# the standard pattern of logging.getLogger(__name__)
 logger = logging.getLogger('tuf')
 logger.setLevel(_DEFAULT_LOG_LEVEL)
+logger.addHandler(logging.NullHandler())
 
 # Set the built-in file handler.  Messages will be logged to
 # 'settings.LOG_FILENAME', and only those messages with a log level of
@@ -173,7 +177,7 @@ class ConsoleFilter(logging.Filter):
       # file logging handler, the user may always consult the file log for the
       # original exception traceback. The exc_info is explained here:
       # http://docs.python.org/2/library/sys.html#sys.exc_info
-      exc_type, junk, junk = record.exc_info
+      exc_type, _, _ = record.exc_info
 
       # Simply set the class name as the exception text.
       record.exc_text = exc_type.__name__
@@ -446,6 +450,7 @@ def disable_file_logging():
 
   if file_handler:
     logger.removeHandler(file_handler)
+    file_handler.close()
     file_handler = None
     logger.debug('Removed the file handler.')
 
