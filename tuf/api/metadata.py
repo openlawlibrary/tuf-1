@@ -29,6 +29,7 @@ A basic example of repository implementation using the Metadata is available in
 """
 import abc
 import fnmatch
+import git
 import io
 import logging
 import tempfile
@@ -49,6 +50,8 @@ from typing import (
     Union,
     cast,
 )
+
+from urllib.parse import urlparse, parse_qs
 
 from securesystemslib import exceptions as sslib_exceptions
 from securesystemslib import hash as sslib_hash
@@ -81,6 +84,9 @@ TOP_LEVEL_ROLE_NAMES = {_ROOT, _TIMESTAMP, _SNAPSHOT, _TARGETS}
 
 # T is a Generic type constraint for Metadata.signed
 T = TypeVar("T", "Root", "Timestamp", "Snapshot", "Targets")
+
+# Merkle DAG Ecosystems Supported
+KNOWN_MERKLE_DAG_ECOSYSTEMS = ["git"]
 
 
 class Metadata(Generic[T]):
@@ -1154,6 +1160,97 @@ class MetaFile(BaseFile):
             self._verify_hashes(data, self.hashes)
 
 
+class MerkleDAGFile(BaseFile):
+    def __init__(
+        self,
+        length: int,
+        hashes: Dict[str, str],
+        target_path: str,
+        local_path: str,
+        unrecognized_fields: Optional[Dict[str, Any]] = None,
+    ):
+        self._validate_length(length)
+        self._validate_hashes(hashes)
+
+        self.length = length
+        self.hashes = hashes
+        self.target_path = target_path
+        self.local_path = local_path
+        if unrecognized_fields is None:
+            unrecognized_fields = {}
+
+        self.unrecognized_fields = unrecognized_fields
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, MerkleDAGFile):
+            return False
+
+        return (
+            self.length == other.length
+            and self.hashes == other.hashes
+            and self.target_path == other.target_path
+            and self.local_path == other.local_path
+            and self.unrecognized_fields == other.unrecognized_fields
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "length": self.length,
+            "hashes": self.hashes,
+            **self.unrecognized_fields,
+        }
+
+    @classmethod
+    def from_merkle_dag(cls,
+        target_path: str,
+        identifier: str,
+        local_path: Optional[str] = None,
+    ) -> "MerkleDAGFile":
+        uri = urlparse(target_path)
+        if uri.scheme not in KNOWN_MERKLE_DAG_ECOSYSTEMS:
+            raise ValueError(
+                f"Unknown Merkle DAG ecosystem {uri.scheme} encountered \
+                in {target_path}"
+            )  # pragma: no cover
+
+        if uri.scheme == "git":
+            if not local_path:
+                raise ValueError(f"No local path found for Git object \
+                    {target_path}")
+            repo = git.repo.base.Repo(local_path)
+            if not repo.is_valid_object(identifier):
+                raise ValueError(f"Object {identifier} not found in local copy \
+                    of Git repository")
+            if uri.query:
+                qs = parse_qs(uri.query)
+                if "branch" in qs and "tag" in qs:
+                    raise ValueError(f"{target_path} contains both branch and tag parameters")
+
+                branch = None
+                tag = None
+                if "branch" in qs:
+                    branch = qs["branch"][0]
+                elif "tag" in qs:
+                    tag = qs["tag"][0]
+
+                if branch:
+                    if branch not in repo.branches:
+                        raise ValueError(f"Branch {branch} is not present in local copy of repository")
+                    if repo.branches[branch].commit.hexsha != identifier:
+                        raise ValueError(f"Identifier {identifier} is not currently the tip of branch {branch}")
+
+                if tag:
+                    if tag not in repo.tags:
+                        raise ValueError(f"Tag {tag} is not present in local copy of repository")
+                    if repo.tags[tag].commit.hexsha != identifier:
+                        raise ValueError(f"Identifier {identifier} does not match tag {tag}")
+            else:
+                if repo.head.commit.hexsha != identifier:
+                    raise ValueError(f"Identifier {identifier} is not currently the tip of the active branch")
+
+        return cls(1, {uri.scheme: identifier}, target_path, local_path)
+
+
 class Timestamp(Signed):
     """A container for the signed part of timestamp metadata.
 
@@ -2048,3 +2145,34 @@ class Targets(Signed):
             self.delegations.succinct_roles.keyids.remove(keyid)
 
         del self.delegations.keys[keyid]
+
+    def add_target(self, path: str, local_path: Optional[str] = None, merkle_dag_identifier: Optional[str] = None, overwrite: Optional[bool] = False) -> None:
+        """Adds a single target and updates the role.
+
+        If ``path`` points to a regular file, the hash of the file is
+        calculated and a ``TargetFile`` object is generated. If the path is a
+        Merkle DAG object, the passed ``target`` object is used as passed.
+
+        Args:
+            path: Location of the target object
+            target: For use with Merkle DAG objects, the pre-computed hash values
+                are used as is.
+        """
+        if path in self.targets and overwrite is False:
+            raise ValueError(f"Path {path} is already registered as a target and overwrite is not enabled")
+
+        for scheme in KNOWN_MERKLE_DAG_ECOSYSTEMS:
+            if path.startswith(f"{scheme}:"):
+                if merkle_dag_identifier is None:
+                    raise ValueError(f"Merkle DAG object with scheme {scheme} \
+                        found but Merkle object identifier is empty")
+                target = MerkleDAGFile.from_merkle_dag(
+                    path,
+                    merkle_dag_identifier,
+                    local_path,
+                )
+                break
+        else:
+            target = TargetFile.from_file(path, path)
+
+        self.targets[path] = target
