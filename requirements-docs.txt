@@ -1,0 +1,8 @@
+# Install documentation build requirements
+
+# pinned tuf runtime dependencies (should auto-update and -trigger ci/cd)
+-r requirements-pinned.txt
+
+# install sphinx and its extensions
+sphinx
+sphinx-rtd-theme

@@ -1,7 +1,0 @@
-oll-securesystemslib[crypto,pynacl]==0.11.3.dev5
-six
-iso8601
-coverage
-coveralls
-pylint
-requests
