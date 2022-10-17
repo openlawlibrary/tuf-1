@@ -3,13 +3,13 @@
 
 """Client update workflow implementation
 
-The Updater class provides an implementation of the
+The ``Updater`` class provides an implementation of the
 `TUF client workflow
 <https://theupdateframework.github.io/specification/latest/#detailed-client-workflow>`_.
-Updater provides an API to query available targets and to download them in a
+``Updater`` provides an API to query available targets and to download them in a
 secure manner: All downloaded files are verified by signed metadata.
 
-High-level description of Updater functionality:
+High-level description of ``Updater`` functionality:
   * Initializing an ``Updater`` loads and validates the trusted local root
     metadata: This root metadata is used as the source of trust for all other
     metadata.
@@ -18,7 +18,7 @@ High-level description of Updater functionality:
     metadata and metadata downloaded from the remote repository. If refresh is
     not done explicitly, it will happen automatically during the first target
     info lookup.
-  * Updater can be used to download targets. For each target:
+  * ``Updater`` can be used to download targets. For each target:
 
       * ``Updater.get_targetinfo()`` is first used to find information about a
         specific target. This will load new targets metadata as needed (from
@@ -28,46 +28,19 @@ High-level description of Updater functionality:
       * ``Updater.download_target()`` downloads a target file and ensures it is
         verified correct by the metadata.
 
-Below is a simple example of using the Updater to download and verify
-"file.txt" from a remote repository. The required environment for this example
-is:
-
-    * A webserver running on http://localhost:8000, serving TUF repository
-      metadata at "/tuf-repo/" and targets at "/targets/"
-    * Local metadata directory "~/tufclient/metadata/" is writable and contains
-      a root metadata version for the remote repository
-    * Download directory "~/tufclient/downloads/" is writable
-
-Example::
-
-    from tuf.ngclient import Updater
-
-    # Load trusted local root metadata from client metadata cache. Define
-    # where metadata and targets will be downloaded from.
-    updater = Updater(
-        metadata_dir="~/tufclient/metadata/",
-        metadata_base_url="http://localhost:8000/tuf-repo/",
-        target_dir="~/tufclient/downloads/",
-        target_base_url="http://localhost:8000/targets/",
-    )
-
-    # Update metadata, then download target if needed
-    info = updater.get_targetinfo("file.txt")
-    path = updater.find_cached_target(info)
-    if path is None:
-        path = updater.download_target(info)
-    print(f"Local file {path} contains target {info.path}")
+A simple example of using the Updater to implement a Python TUF client that
+downloads target files is available in `examples/client_example
+<https://github.com/theupdateframework/python-tuf/tree/develop/examples/client_example>`_.
 """
 
 import logging
 import os
+import shutil
 import tempfile
 from typing import Optional, Set
 from urllib import parse
 
-from securesystemslib import util as sslib_util
-
-from tuf import exceptions
+from tuf.api import exceptions
 from tuf.api.metadata import (
     Metadata,
     Root,
@@ -84,19 +57,19 @@ logger = logging.getLogger(__name__)
 
 
 class Updater:
-    """Creates a new Updater instance and loads trusted root metadata.
+    """Creates a new ``Updater`` instance and loads trusted root metadata.
 
     Args:
         metadata_dir: Local metadata directory. Directory must be
-            writable and it must contain a trusted root.json file.
+            writable and it must contain a trusted root.json file
         metadata_base_url: Base URL for all remote metadata downloads
         target_dir: Local targets directory. Directory must be writable. It
             will be used as the default target download directory by
             ``find_cached_target()`` and ``download_target()``
-        target_base_url: Optional; Default base URL for all remote target
-            downloads. Can be individually set in download_target()
-        fetcher: Optional; FetcherInterface implementation used to download
-            both metadata and targets. Default is RequestsFetcher
+        target_base_url: ``Optional``; Default base URL for all remote target
+            downloads. Can be individually set in ``download_target()``
+        fetcher: ``Optional``; ``FetcherInterface`` implementation used to
+            download both metadata and targets. Default is ``RequestsFetcher``
 
     Raises:
         OSError: Local root.json cannot be read
@@ -141,13 +114,13 @@ class Updater:
         that happens on demand during ``get_targetinfo()``. However, if the
         repository uses `consistent_snapshot
         <https://theupdateframework.github.io/specification/latest/#consistent-snapshots>`_,
-        then all metadata downloaded downloaded by the Updater will use the same
-        consistent repository state.
+        then all metadata downloaded by the Updater will use the same consistent
+        repository state.
 
         Raises:
             OSError: New metadata could not be written to disk
             RepositoryError: Metadata failed to verify in some way
-            TODO: download-related errors
+            DownloadError: Download of a metadata file failed in some way
         """
 
         self._load_root()
@@ -164,7 +137,7 @@ class Updater:
         return os.path.join(self.target_dir, filename)
 
     def get_targetinfo(self, target_path: str) -> Optional[TargetFile]:
-        """Returns TargetFile instance with information for 'target_path'.
+        """Returns ``TargetFile`` instance with information for ``target_path``.
 
         The return value can be used as an argument to
         ``download_target()`` and ``find_cached_target()``.
@@ -176,17 +149,17 @@ class Updater:
         targets) metadata it needs to return the target information.
 
         Args:
-            target_path: A `path-relative-URL string
+            target_path: `path-relative-URL string
                 <https://url.spec.whatwg.org/#path-relative-url-string>`_
                 that uniquely identifies the target within the repository.
 
         Raises:
             OSError: New metadata could not be written to disk
             RepositoryError: Metadata failed to verify in some way
-            TODO: download-related errors
+            DownloadError: Download of a metadata file failed in some way
 
         Returns:
-            A TargetFile instance or None.
+            ``TargetFile`` instance or ``None``.
         """
 
         if self._trusted_set.targets is None:
@@ -201,16 +174,16 @@ class Updater:
         """Checks whether a local file is an up to date target
 
         Args:
-            targetinfo: TargetFile from ``get_targetinfo()``.
-            filepath: Local path to file. If None, a file path is generated
-            based on ``target_dir`` constructor argument.
+            targetinfo: ``TargetFile`` from ``get_targetinfo()``.
+            filepath: Local path to file. If ``None``, a file path is
+                generated based on ``target_dir`` constructor argument.
 
         Raises:
             ValueError: Incorrect arguments
 
         Returns:
             Local file path if the file is an up to date target file.
-            None if file is not found or it is not up to date.
+            ``None`` if file is not found or it is not up to date.
         """
 
         if filepath is None:
@@ -232,18 +205,19 @@ class Updater:
         """Downloads the target file specified by ``targetinfo``.
 
         Args:
-            targetinfo: TargetFile from ``get_targetinfo()``.
-            filepath: Local path to download into. If None, the file is
+            targetinfo: ``TargetFile`` from ``get_targetinfo()``.
+            filepath: Local path to download into. If ``None``, the file is
                 downloaded into directory defined by ``target_dir`` constructor
                 argument using a generated filename. If file already exists,
                 it is overwritten.
             target_base_url: Base URL used to form the final target
-                download URL. Default is the value provided in Updater()
+                download URL. Default is the value provided in ``Updater()``
 
         Raises:
             ValueError: Invalid arguments
-            TODO: download-related errors
-            TODO: file write errors
+            DownloadError: Download of the target file failed in some way
+            RepositoryError: Downloaded target failed to be verified in some way
+            OSError: Failed to write target to file
 
         Returns:
             Local path to downloaded file
@@ -274,14 +248,11 @@ class Updater:
         with self._fetcher.download_file(
             full_url, targetinfo.length
         ) as target_file:
-            try:
-                targetinfo.verify_length_and_hashes(target_file)
-            except exceptions.LengthOrHashMismatchError as e:
-                raise exceptions.RepositoryError(
-                    f"{target_filepath} length or hashes do not match"
-                ) from e
+            targetinfo.verify_length_and_hashes(target_file)
 
-            sslib_util.persist_temp_file(target_file, filepath)
+            target_file.seek(0)
+            with open(filepath, "wb") as destination_file:
+                shutil.copyfileobj(target_file, destination_file)
 
         logger.info("Downloaded target %s", targetinfo.path)
         return filepath
@@ -290,10 +261,11 @@ class Updater:
         self, rolename: str, length: int, version: Optional[int] = None
     ) -> bytes:
         """Download a metadata file and return it as bytes"""
+        encoded_name = parse.quote(rolename, "")
         if version is None:
-            url = f"{self._metadata_base_url}{rolename}.json"
+            url = f"{self._metadata_base_url}{encoded_name}.json"
         else:
-            url = f"{self._metadata_base_url}{version}.{rolename}.json"
+            url = f"{self._metadata_base_url}{version}.{encoded_name}.json"
         return self._fetcher.download_bytes(url, length)
 
     def _load_local_metadata(self, rolename: str) -> bytes:
@@ -303,15 +275,26 @@ class Updater:
 
     def _persist_metadata(self, rolename: str, data: bytes) -> None:
         """Write metadata to disk atomically to avoid data loss."""
-
-        # encode the rolename to avoid issues with e.g. path separators
-        encoded_name = parse.quote(rolename, "")
-        filename = os.path.join(self._dir, f"{encoded_name}.json")
-        with tempfile.NamedTemporaryFile(
-            dir=self._dir, delete=False
-        ) as temp_file:
-            temp_file.write(data)
-        os.replace(temp_file.name, filename)
+        temp_file_name: Optional[str] = None
+        try:
+            # encode the rolename to avoid issues with e.g. path separators
+            encoded_name = parse.quote(rolename, "")
+            filename = os.path.join(self._dir, f"{encoded_name}.json")
+            with tempfile.NamedTemporaryFile(
+                dir=self._dir, delete=False
+            ) as temp_file:
+                temp_file_name = temp_file.name
+                temp_file.write(data)
+            os.replace(temp_file.name, filename)
+        except OSError as e:
+            # remove tempfile if we managed to create one,
+            # then let the exception happen
+            if temp_file_name is not None:
+                try:
+                    os.remove(temp_file_name)
+                except FileNotFoundError:
+                    pass
+            raise e
 
     def _load_root(self) -> None:
         """Load remote root metadata.
@@ -334,7 +317,7 @@ class Updater:
                 self._trusted_set.update_root(data)
                 self._persist_metadata(Root.type, data)
 
-            except exceptions.FetcherHTTPError as exception:
+            except exceptions.DownloadHTTPError as exception:
                 if exception.status_code not in {403, 404}:
                     raise
                 # 404/403 means current root is newest available
@@ -353,7 +336,13 @@ class Updater:
         data = self._download_metadata(
             Timestamp.type, self.config.timestamp_max_length
         )
-        self._trusted_set.update_timestamp(data)
+        try:
+            self._trusted_set.update_timestamp(data)
+        except exceptions.EqualVersionNumberError:
+            # If the new timestamp version is the same as current, discard the
+            # new timestamp. This is normal and it shouldn't raise any error.
+            return
+
         self._persist_metadata(Timestamp.type, data)
 
     def _load_snapshot(self) -> None:
@@ -378,7 +367,7 @@ class Updater:
             self._persist_metadata(Snapshot.type, data)
 
     def _load_targets(self, role: str, parent_role: str) -> Metadata[Targets]:
-        """Load local (and if needed remote) metadata for 'role'."""
+        """Load local (and if needed remote) metadata for ``role``."""
 
         # Avoid loading 'role' more than once during "get_targetinfo"
         if role in self._trusted_set:
@@ -423,10 +412,12 @@ class Updater:
         # is needed to load and verify the delegated targets metadata.
         delegations_to_visit = [(Targets.type, Root.type)]
         visited_role_names: Set[str] = set()
-        number_of_delegations = self.config.max_delegations
 
         # Preorder depth-first traversal of the graph of target delegations.
-        while number_of_delegations > 0 and len(delegations_to_visit) > 0:
+        while (
+            len(visited_role_names) <= self.config.max_delegations
+            and len(delegations_to_visit) > 0
+        ):
 
             # Pop the role name from the top of the stack.
             role_name, parent_role = delegations_to_visit.pop(-1)
@@ -449,34 +440,30 @@ class Updater:
             # After preorder check, add current role to set of visited roles.
             visited_role_names.add(role_name)
 
-            # And also decrement number of visited roles.
-            number_of_delegations -= 1
-
             if targets.delegations is not None:
                 child_roles_to_visit = []
                 # NOTE: This may be a slow operation if there are many
                 # delegated roles.
-                for child_role in targets.delegations.roles.values():
-                    if child_role.is_delegated_path(target_filepath):
-                        logger.debug("Adding child role %s", child_role.name)
+                for (
+                    child_name,
+                    terminating,
+                ) in targets.delegations.get_roles_for_target(target_filepath):
 
-                        child_roles_to_visit.append(
-                            (child_role.name, role_name)
-                        )
-                        if child_role.terminating:
-                            logger.debug("Not backtracking to other roles.")
-                            delegations_to_visit = []
-                            break
+                    logger.debug("Adding child role %s", child_name)
+                    child_roles_to_visit.append((child_name, role_name))
+                    if terminating:
+                        logger.debug("Not backtracking to other roles")
+                        delegations_to_visit = []
+                        break
                 # Push 'child_roles_to_visit' in reverse order of appearance
                 # onto 'delegations_to_visit'.  Roles are popped from the end of
                 # the list.
                 child_roles_to_visit.reverse()
                 delegations_to_visit.extend(child_roles_to_visit)
 
-        if number_of_delegations == 0 and len(delegations_to_visit) > 0:
+        if len(delegations_to_visit) > 0:
             logger.debug(
-                "%d roles left to visit, but allowed to "
-                "visit at most %d delegations.",
+                "%d roles left to visit, but allowed at most %d delegations",
                 len(delegations_to_visit),
                 self.config.max_delegations,
             )

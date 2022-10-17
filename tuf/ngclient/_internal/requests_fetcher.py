@@ -1,8 +1,8 @@
 # Copyright 2021, New York University and the TUF contributors
 # SPDX-License-Identifier: MIT OR Apache-2.0
 
-"""Provides an implementation of FetcherInterface using the Requests HTTP
-  library.
+"""Provides an implementation of ``FetcherInterface`` using the Requests
+  HTTP library.
 """
 
 import logging
@@ -11,10 +11,9 @@ from urllib import parse
 
 # Imports
 import requests
-import urllib3.exceptions
 
 import tuf
-from tuf import exceptions
+from tuf.api import exceptions
 from tuf.ngclient.fetcher import FetcherInterface
 
 # Globals
@@ -22,11 +21,10 @@ logger = logging.getLogger(__name__)
 
 # Classes
 class RequestsFetcher(FetcherInterface):
-    """A concrete implementation of FetcherInterface based on the Requests
-    library.
+    """An implementation of ``FetcherInterface`` based on the requests library.
 
     Attributes:
-        _sessions: A dictionary of Requests.Session objects storing a separate
+        _sessions: Dictionary of ``Requests.Session`` objects storing a separate
             session per scheme+hostname combination.
     """
 
@@ -51,19 +49,19 @@ class RequestsFetcher(FetcherInterface):
         self.socket_timeout: int = 4  # seconds
         self.chunk_size: int = 400000  # bytes
 
-    def fetch(self, url: str) -> Iterator[bytes]:
+    def _fetch(self, url: str) -> Iterator[bytes]:
         """Fetches the contents of HTTP/HTTPS url from a remote server
 
-        Arguments:
-            url: A URL string that represents a file location.
+        Args:
+            url: URL string that represents a file location.
 
         Raises:
-            exceptions.SlowRetrievalError: A timeout occurs while receiving
+            exceptions.SlowRetrievalError: Timeout occurs while receiving
                 data.
-            exceptions.FetcherHTTPError: An HTTP error code is received.
+            exceptions.DownloadHTTPError: HTTP error code is received.
 
         Returns:
-            A bytes iterator
+            Bytes iterator
         """
         # Get a customized session for each new schema+hostname combination.
         session = self._get_session(url)
@@ -79,7 +77,7 @@ class RequestsFetcher(FetcherInterface):
             response = session.get(
                 url, stream=True, timeout=self.socket_timeout
             )
-        except urllib3.exceptions.TimeoutError as e:
+        except requests.exceptions.Timeout as e:
             raise exceptions.SlowRetrievalError from e
 
         # Check response status.
@@ -88,7 +86,7 @@ class RequestsFetcher(FetcherInterface):
         except requests.HTTPError as e:
             response.close()
             status = e.response.status_code
-            raise exceptions.FetcherHTTPError(str(e), status)
+            raise exceptions.DownloadHTTPError(str(e), status)
 
         return self._chunks(response)
 
@@ -98,26 +96,12 @@ class RequestsFetcher(FetcherInterface):
         download."""
 
         try:
-            while True:
-                # We download a fixed chunk of data in every round. This is
-                # so that we can defend against slow retrieval attacks.
-                # Furthermore, we do not wish to download an extremely
-                # large file in one shot.
-
-                # NOTE: This may not handle some servers adding a
-                # Content-Encoding header, which may cause urllib3 to
-                #  misbehave:
-                # https://github.com/pypa/pip/blob/404838abcca467648180b358598c597b74d568c9/src/pip/_internal/download.py#L547-L582
-                data = response.raw.read(self.chunk_size)
-
-                # We might have no more data to read, we signal
-                # that the download is complete.
-                if not data:
-                    break
-
+            for data in response.iter_content(self.chunk_size):
                 yield data
-
-        except urllib3.exceptions.ReadTimeoutError as e:
+        except (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+        ) as e:
             raise exceptions.SlowRetrievalError from e
 
         finally:
@@ -126,41 +110,28 @@ class RequestsFetcher(FetcherInterface):
     def _get_session(self, url: str) -> requests.Session:
         """Returns a different customized requests.Session per schema+hostname
         combination.
+
+        Raises:
+            exceptions.DownloadError: When there is a problem parsing the url.
         """
         # Use a different requests.Session per schema+hostname combination, to
         # reuse connections while minimizing subtle security issues.
         parsed_url = parse.urlparse(url)
 
         if not parsed_url.scheme or not parsed_url.hostname:
-            raise exceptions.URLParsingError(
-                "Could not get scheme and hostname from URL: " + url
-            )
+            raise exceptions.DownloadError(f"Failed to parse URL {url}")
 
-        session_index = parsed_url.scheme + "+" + parsed_url.hostname
+        session_index = f"{parsed_url.scheme}+{parsed_url.hostname}"
         session = self._sessions.get(session_index)
 
         if not session:
             session = requests.Session()
             self._sessions[session_index] = session
 
-            # Attach some default headers to every Session.
-            requests_user_agent = session.headers["User-Agent"]
-            # Follows the RFC: https://tools.ietf.org/html/rfc7231#section-5.5.3
-            tuf_user_agent = (
-                "tuf/" + tuf.__version__ + " " + requests_user_agent
-            )
-            session.headers.update(
-                {
-                    # Tell the server not to compress or modify anything.
-                    # https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Encoding#Directives
-                    "Accept-Encoding": "identity",
-                    # The TUF user agent.
-                    "User-Agent": tuf_user_agent,
-                }
-            )
+            ua = f"tuf/{tuf.__version__} {session.headers['User-Agent']}"
+            session.headers["User-Agent"] = ua
 
             logger.debug("Made new session %s", session_index)
-
         else:
             logger.debug("Reusing session %s", session_index)
 
