@@ -20,66 +20,33 @@
 <Purpose>
   Download metadata and target files and check their validity.  The hash and
   length of a downloaded file has to match the hash and length supplied by the
-  metadata of that file.  The downloaded file is technically a  file-like
-  object that will automatically destroys itself once closed.  Note that the
-  file-like object, 'securesystemslib.util.TempFile', is returned by the
-  '_download_file()' function.
+  metadata of that file.
 """
 
-# Help with Python 3 compatibility, where the print statement is a function, an
-# implicit relative import is invalid, and the '/' operator performs true
-# division.  Example:  print 'hello world' raises a 'SyntaxError' exception.
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import unicode_literals
-
 import logging
-import time
 import timeit
+import tempfile
+from urllib import parse
 
-import tuf
-import requests
+import securesystemslib # pylint: disable=unused-import
+from securesystemslib import formats as sslib_formats
 
-import securesystemslib
-import securesystemslib.util
-import six
-import tuf.exceptions
-
-import urllib3.exceptions
+from tuf import exceptions
+from tuf import formats
+from tuf import settings
 
 # See 'log.py' to learn how logging is handled in TUF.
-logger = logging.getLogger('tuf.download')
-
-# From http://docs.python-requests.org/en/master/user/advanced/#session-objects:
-#
-# "The Session object allows you to persist certain parameters across requests.
-# It also persists cookies across all requests made from the Session instance,
-# and will use urllib3's connection pooling. So if you're making several
-# requests to the same host, the underlying TCP connection will be reused,
-# which can result in a significant performance increase (see HTTP persistent
-# connection)."
-#
-# NOTE: We use a separate requests.Session per scheme+hostname combination, in
-# order to reuse connections to the same hostname to improve efficiency, but
-# avoiding sharing state between different hosts-scheme combinations to
-# minimize subtle security issues. Some cookies may not be HTTP-safe.
-_sessions = {}
+logger = logging.getLogger(__name__)
 
 
-def safe_download(url, required_length):
+def safe_download(url, required_length, fetcher):
   """
   <Purpose>
     Given the 'url' and 'required_length' of the desired file, open a connection
     to 'url', download it, and return the contents of the file.  Also ensure
     the length of the downloaded file matches 'required_length' exactly.
-    tuf.download.unsafe_download() may be called if an upper download limit is
+    download.unsafe_download() may be called if an upper download limit is
     preferred.
-
-    'securesystemslib.util.TempFile', the file-like object returned, is used
-    instead of regular tempfile object because of additional functionality
-    provided, such as handling compressed metadata and automatically closing
-    files after moving to final destination.
 
   <Arguments>
     url:
@@ -89,9 +56,12 @@ def safe_download(url, required_length):
       An integer value representing the length of the file.  This is an exact
       limit.
 
+    fetcher:
+      An object implementing FetcherInterface that performs the network IO
+      operations.
+
   <Side Effects>
-    A 'securesystemslib.util.TempFile' object is created on disk to store the
-    contents of 'url'.
+    A file object is created on disk to store the contents of 'url'.
 
   <Exceptions>
     tuf.ssl_commons.exceptions.DownloadLengthMismatchError, if there was a
@@ -103,34 +73,28 @@ def safe_download(url, required_length):
     Any other unforeseen runtime exception.
 
   <Returns>
-    A 'securesystemslib.util.TempFile' file-like object that points to the
-    contents of 'url'.
+    A file object that points to the contents of 'url'.
   """
 
   # Do all of the arguments have the appropriate format?
   # Raise 'securesystemslib.exceptions.FormatError' if there is a mismatch.
-  securesystemslib.formats.URL_SCHEMA.check_match(url)
-  securesystemslib.formats.LENGTH_SCHEMA.check_match(required_length)
+  sslib_formats.URL_SCHEMA.check_match(url)
+  formats.LENGTH_SCHEMA.check_match(required_length)
 
-  return _download_file(url, required_length, STRICT_REQUIRED_LENGTH=True)
-
-
+  return _download_file(url, required_length, fetcher, STRICT_REQUIRED_LENGTH=True)
 
 
 
-def unsafe_download(url, required_length):
+
+
+def unsafe_download(url, required_length, fetcher):
   """
   <Purpose>
     Given the 'url' and 'required_length' of the desired file, open a connection
     to 'url', download it, and return the contents of the file.  Also ensure
     the length of the downloaded file is up to 'required_length', and no larger.
-    tuf.download.safe_download() may be called if an exact download limit is
+    download.safe_download() may be called if an exact download limit is
     preferred.
-
-    'securesystemslib.util.TempFile', the file-like object returned, is used
-    instead of regular tempfile object because of additional functionality
-    provided, such as handling compressed metadata and automatically closing
-    files after moving to final destination.
 
   <Arguments>
     url:
@@ -140,9 +104,12 @@ def unsafe_download(url, required_length):
       An integer value representing the length of the file.  This is an upper
       limit.
 
+    fetcher:
+      An object implementing FetcherInterface that performs the network IO
+      operations.
+
   <Side Effects>
-    A 'securesystemslib.util.TempFile' object is created on disk to store the
-    contents of 'url'.
+    A file object is created on disk to store the contents of 'url'.
 
   <Exceptions>
     tuf.ssl_commons.exceptions.DownloadLengthMismatchError, if there was a
@@ -154,22 +121,21 @@ def unsafe_download(url, required_length):
     Any other unforeseen runtime exception.
 
   <Returns>
-    A 'securesystemslib.util.TempFile' file-like object that points to the
-    contents of 'url'.
+    A file object that points to the contents of 'url'.
   """
 
   # Do all of the arguments have the appropriate format?
   # Raise 'securesystemslib.exceptions.FormatError' if there is a mismatch.
-  securesystemslib.formats.URL_SCHEMA.check_match(url)
-  securesystemslib.formats.LENGTH_SCHEMA.check_match(required_length)
+  sslib_formats.URL_SCHEMA.check_match(url)
+  formats.LENGTH_SCHEMA.check_match(required_length)
 
-  return _download_file(url, required_length, STRICT_REQUIRED_LENGTH=False)
-
-
+  return _download_file(url, required_length, fetcher, STRICT_REQUIRED_LENGTH=False)
 
 
 
-def _download_file(url, required_length, STRICT_REQUIRED_LENGTH=True):
+
+
+def _download_file(url, required_length, fetcher, STRICT_REQUIRED_LENGTH=True):
   """
   <Purpose>
     Given the url and length of the desired file, this function opens a
@@ -177,10 +143,6 @@ def _download_file(url, required_length, STRICT_REQUIRED_LENGTH=True):
     matches 'required_length' if 'STRICT_REQUIRED_LENGH' is True (If False,
     the file's length is not checked and a slow retrieval exception is raised
     if the downloaded rate falls below the acceptable rate).
-
-    securesystemslib.util.TempFile is used instead of regular tempfile object
-    because of additional functionality provided by
-    'securesystemslib.util.TempFile'.
 
   <Arguments>
     url:
@@ -196,8 +158,7 @@ def _download_file(url, required_length, STRICT_REQUIRED_LENGTH=True):
       timestamp metadata, which has no signed required_length.
 
   <Side Effects>
-    A 'securesystemslib.util.TempFile' object is created on disk to store the
-    contents of 'url'.
+    A file object is created on disk to store the contents of 'url'.
 
   <Exceptions>
     tuf.exceptions.DownloadLengthMismatchError, if there was a
@@ -209,312 +170,58 @@ def _download_file(url, required_length, STRICT_REQUIRED_LENGTH=True):
     Any other unforeseen runtime exception.
 
   <Returns>
-    A 'securesystemslib.util.TempFile' file-like object that points to the
-    contents of 'url'.
+    A file object that points to the contents of 'url'.
   """
-
-  # Do all of the arguments have the appropriate format?
-  # Raise 'securesystemslib.exceptions.FormatError' if there is a mismatch.
-  securesystemslib.formats.URL_SCHEMA.check_match(url)
-  securesystemslib.formats.LENGTH_SCHEMA.check_match(required_length)
-
   # 'url.replace('\\', '/')' is needed for compatibility with Windows-based
   # systems, because they might use back-slashes in place of forward-slashes.
   # This converts it to the common format.  unquote() replaces %xx escapes in a
   # url with their single-character equivalent.  A back-slash may be encoded as
   # %5c in the url, which should also be replaced with a forward slash.
-  url = six.moves.urllib.parse.unquote(url).replace('\\', '/')
+  url = parse.unquote(url).replace('\\', '/')
   logger.info('Downloading: ' + repr(url))
 
   # This is the temporary file that we will return to contain the contents of
   # the downloaded file.
-  temp_file = securesystemslib.util.TempFile()
+  temp_file = tempfile.TemporaryFile()
+
+  average_download_speed = 0
+  number_of_bytes_received = 0
 
   try:
-    # Use a different requests.Session per schema+hostname combination, to
-    # reuse connections while minimizing subtle security issues.
-    parsed_url = six.moves.urllib.parse.urlparse(url)
+    chunks = fetcher.fetch(url, required_length)
+    start_time = timeit.default_timer()
+    for chunk in chunks:
 
-    if not parsed_url.scheme or not parsed_url.hostname:
-      raise tuf.exceptions.URLParsingError(
-          'Could not get scheme and hostname from URL: ' + url)
+      stop_time = timeit.default_timer()
+      temp_file.write(chunk)
 
-    session_index = parsed_url.scheme + '+' + parsed_url.hostname
+      # Measure the average download speed.
+      number_of_bytes_received += len(chunk)
+      seconds_spent_receiving = stop_time - start_time
+      average_download_speed = number_of_bytes_received / seconds_spent_receiving
 
-    logger.debug('url: ' + url)
-    logger.debug('session index: ' + session_index)
+      if average_download_speed < settings.MIN_AVERAGE_DOWNLOAD_SPEED:
+        logger.debug('The average download speed dropped below the minimum'
+          ' average download speed set in settings. Stopping the download!.')
+        break
 
-    session = _sessions.get(session_index)
-
-    if not session:
-      session = requests.Session()
-      _sessions[session_index] = session
-
-      # Attach some default headers to every Session.
-      requests_user_agent = session.headers['User-Agent']
-      # Follows the RFC: https://tools.ietf.org/html/rfc7231#section-5.5.3
-      tuf_user_agent = 'tuf/' + tuf.__version__ + ' ' + requests_user_agent
-      session.headers.update({
-          # Tell the server not to compress or modify anything.
-          # https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Encoding#Directives
-          'Accept-Encoding': 'identity',
-          # The TUF user agent.
-          'User-Agent': tuf_user_agent})
-
-      logger.debug('Made new session for ' + session_index)
-
-    else:
-      logger.debug('Reusing session for ' + session_index)
-
-    # Get the requests.Response object for this URL.
-    #
-    # Always stream to control how requests are downloaded:
-    # http://docs.python-requests.org/en/master/user/advanced/#body-content-workflow
-    #
-    # We will always manually close Responses, so no need for a context
-    # manager.
-    #
-    # Always set the timeout. This timeout value is interpreted by requests as:
-    #  - connect timeout (max delay before first byte is received)
-    #  - read (gap) timeout (max delay between bytes received)
-    # These are NOT overall/total, wall-clock timeouts for any single read.
-    # http://docs.python-requests.org/en/master/user/advanced/#timeouts
-    response = session.get(
-        url, stream=True, timeout=tuf.settings.SOCKET_TIMEOUT)
-
-    # Check response status.
-    response.raise_for_status()
-
-    # We ask the server about how big it thinks this file should be.
-    reported_length = _get_content_length(response)
-
-    # Then, we check whether the required length matches the reported length.
-    _check_content_length(reported_length, required_length,
-                          STRICT_REQUIRED_LENGTH)
-
-    # Download the contents of the URL, up to the required length, to a
-    # temporary file, and get the total number of downloaded bytes.
-    total_downloaded, average_download_speed = \
-      _download_fixed_amount_of_data(response, temp_file, required_length)
+      else:
+        logger.debug('The average download speed has not dipped below the'
+          ' minimum average download speed set in settings.')
 
     # Does the total number of downloaded bytes match the required length?
-    _check_downloaded_length(total_downloaded, required_length,
+    _check_downloaded_length(number_of_bytes_received, required_length,
                              STRICT_REQUIRED_LENGTH=STRICT_REQUIRED_LENGTH,
                              average_download_speed=average_download_speed)
 
   except Exception:
     # Close 'temp_file'.  Any written data is lost.
-    temp_file.close_temp_file()
-    logger.exception('Could not download URL: ' + repr(url))
+    temp_file.close()
+    logger.debug('Could not download URL: ' + repr(url))
     raise
 
   else:
     return temp_file
-
-
-
-
-
-def _download_fixed_amount_of_data(response, temp_file, required_length):
-  """
-  <Purpose>
-    This is a helper function, where the download really happens. While-block
-    reads data from response a fixed chunk of data at a time, or less, until
-    'required_length' is reached.
-
-  <Arguments>
-    response:
-      The object for communicating with the server about the contents of a URL.
-
-    temp_file:
-      A temporary file where the contents at the URL specified by the
-      'response' object will be stored.
-
-    required_length:
-      The number of bytes that we must download for the file.  This is almost
-      always specified by the TUF metadata for the data file in question
-      (except in the case of timestamp metadata, in which case we would fix a
-      reasonable upper bound).
-
-  <Side Effects>
-    Data from the server will be written to 'temp_file'.
-
-  <Exceptions>
-    tuf.exceptions.SlowRetrievalError
-      will be raised if urllib3.exceptions.ReadTimeoutError is caught (if the
-      download times out).
-
-    Otherwise, runtime or network exceptions will be raised without question.
-
-  <Returns>
-    A (total_downloaded, average_download_speed) tuple, where
-    'total_downloaded' is the total number of bytes downloaded for the desired
-    file and the 'average_download_speed' calculated for the download
-    attempt.
-  """
-
-  # Keep track of total bytes downloaded.
-  number_of_bytes_received = 0
-  average_download_speed = 0
-
-  start_time = timeit.default_timer()
-
-  try:
-    while True:
-      # We download a fixed chunk of data in every round. This is so that we
-      # can defend against slow retrieval attacks. Furthermore, we do not wish
-      # to download an extremely large file in one shot.
-      # Before beginning the round, sleep (if set) for a short amount of time
-      # so that the CPU is not hogged in the while loop.
-      if tuf.settings.SLEEP_BEFORE_ROUND:
-        time.sleep(tuf.settings.SLEEP_BEFORE_ROUND)
-
-      read_amount = min(
-          tuf.settings.CHUNK_SIZE, required_length - number_of_bytes_received)
-
-      # NOTE: This may not handle some servers adding a Content-Encoding
-      # header, which may cause urllib3 to misbehave:
-      # https://github.com/pypa/pip/blob/404838abcca467648180b358598c597b74d568c9/src/pip/_internal/download.py#L547-L582
-      data = response.raw.read(read_amount)
-
-      number_of_bytes_received = number_of_bytes_received + len(data)
-
-      # Data successfully read from the response.  Store it.
-      temp_file.write(data)
-
-      if number_of_bytes_received == required_length:
-        break
-
-      stop_time = timeit.default_timer()
-      seconds_spent_receiving = stop_time - start_time
-
-      # Measure the average download speed.
-      average_download_speed = number_of_bytes_received / seconds_spent_receiving
-
-      if average_download_speed < tuf.settings.MIN_AVERAGE_DOWNLOAD_SPEED:
-        logger.debug('The average download speed dropped below the minimum'
-          ' average download speed set in tuf.settings.py.')
-        break
-
-      else:
-        logger.debug('The average download speed has not dipped below the'
-          ' mimimum average download speed set in tuf.settings.py.')
-
-      # We might have no more data to read. Check number of bytes downloaded.
-      if not data:
-        logger.debug('Downloaded ' + repr(number_of_bytes_received) + '/' +
-          repr(required_length) + ' bytes.')
-
-        # Finally, we signal that the download is complete.
-        break
-
-  except urllib3.exceptions.ReadTimeoutError as e:
-    # Whatever happens, make sure that we always close the connection.
-    response.close()
-    raise tuf.exceptions.SlowRetrievalError(str(e))
-
-  except:
-    # Whatever happens, make sure that we always close the connection.
-    response.close()
-    raise
-
-  response.close()
-  return number_of_bytes_received, average_download_speed
-
-
-
-
-
-def _get_content_length(response):
-  """
-  <Purpose>
-    A helper function that gets the purported file length from server.
-
-  <Arguments>
-    response:
-      The object for communicating with the server about the contents of a URL.
-
-  <Side Effects>
-    No known side effects.
-
-  <Exceptions>
-    Runtime exceptions will be suppressed but logged.
-
-  <Returns>
-    reported_length:
-      The total number of bytes reported by server. If the process fails, we
-      return None; otherwise we would return a nonnegative integer.
-  """
-
-  try:
-    # What is the length of this document according to the HTTP spec?
-    reported_length = response.headers.get('Content-Length')
-
-    # Try casting it as a decimal number.
-    reported_length = int(reported_length, 10)
-
-    # Make sure that it is a nonnegative integer.
-    if not reported_length > -1:
-      raise tuf.exceptions.Error('A non-positive length was reported.')
-
-  except Exception as e:
-    logger.exception('Could not get content length'
-        ' about ' + str(response) + ' from server: ' + str(e))
-    return None
-
-  return reported_length
-
-
-
-
-
-def _check_content_length(reported_length, required_length, strict_length=True):
-  """
-  <Purpose>
-    A helper function that checks whether the length reported by server is
-    equal to the length we expected.
-
-  <Arguments>
-    reported_length:
-      The total number of bytes reported by the server.
-
-    required_length:
-      The total number of bytes obtained from (possibly default) metadata.
-
-    strict_length:
-      Boolean that indicates whether the required length of the file is an
-      exact match, or an upper limit (e.g., downloading a Timestamp file).
-
-  <Side Effects>
-    No known side effects.
-
-  <Exceptions>
-    No known exceptions.
-
-  <Returns>
-    None.
-  """
-
-  logger.debug('The server reported a length of '+repr(reported_length)+' bytes.')
-  comparison_result = None
-
-  if reported_length < required_length:
-    comparison_result = 'less than'
-
-  elif reported_length > required_length:
-    comparison_result = 'greater than'
-
-  else:
-    comparison_result = 'equal to'
-
-  if strict_length:
-    logger.debug('The reported length is ' + comparison_result + ' the'
-      ' required length of '+repr(required_length)+' bytes.')
-
-  else:
-    logger.debug('The reported length is ' + comparison_result + ' the upper'
-      ' limit of ' + repr(required_length) + ' bytes.')
-
 
 
 
@@ -556,8 +263,8 @@ def _check_downloaded_length(total_downloaded, required_length,
     required_length.
 
     tuf.exceptions.SlowRetrievalError, if the total downloaded was
-    done in in less than the acceptable download speed (as set in
-    tuf.settings.py).
+    done in less than the acceptable download speed (as set in
+    tuf.settings).
 
   <Returns>
     None.
@@ -573,31 +280,31 @@ def _check_downloaded_length(total_downloaded, required_length,
     # What we downloaded is not equal to the required length, but did we ask
     # for strict checking of required length?
     if STRICT_REQUIRED_LENGTH:
-      logger.error('Downloaded ' + str(total_downloaded) + ' bytes, but'
+      logger.info('Downloaded ' + str(total_downloaded) + ' bytes, but'
         ' expected ' + str(required_length) + ' bytes. There is a difference'
         ' of ' + str(difference_in_bytes) + ' bytes.')
 
       # If the average download speed is below a certain threshold, we flag
       # this as a possible slow-retrieval attack.
       logger.debug('Average download speed: ' + repr(average_download_speed))
-      logger.debug('Minimum average download speed: ' + repr(tuf.settings.MIN_AVERAGE_DOWNLOAD_SPEED))
+      logger.debug('Minimum average download speed: ' + repr(settings.MIN_AVERAGE_DOWNLOAD_SPEED))
 
-      if average_download_speed < tuf.settings.MIN_AVERAGE_DOWNLOAD_SPEED:
-        raise tuf.exceptions.SlowRetrievalError(average_download_speed)
+      if average_download_speed < settings.MIN_AVERAGE_DOWNLOAD_SPEED:
+        raise exceptions.SlowRetrievalError(average_download_speed)
 
       else:
         logger.debug('Good average download speed: ' +
                      repr(average_download_speed) + ' bytes per second')
 
-      raise tuf.exceptions.DownloadLengthMismatchError(required_length, total_downloaded)
+      raise exceptions.DownloadLengthMismatchError(required_length, total_downloaded)
 
     else:
       # We specifically disabled strict checking of required length, but we
       # will log a warning anyway. This is useful when we wish to download the
       # Timestamp or Root metadata, for which we have no signed metadata; so,
       # we must guess a reasonable required_length for it.
-      if average_download_speed < tuf.settings.MIN_AVERAGE_DOWNLOAD_SPEED:
-        raise tuf.exceptions.SlowRetrievalError(average_download_speed)
+      if average_download_speed < settings.MIN_AVERAGE_DOWNLOAD_SPEED:
+        raise exceptions.SlowRetrievalError(average_download_speed)
 
       else:
         logger.debug('Good average download speed: ' +

@@ -57,26 +57,19 @@
   multiple threads in a single process is also thread-safe.  The logging
   module is NOT thread-safe when logging to a single file across multiple
   processes:
-  http://docs.python.org/2/library/logging.html#thread-safety
-  http://docs.python.org/2/howto/logging-cookbook.html
+  http://docs.python.org/library/logging.html#thread-safety
+  http://docs.python.org/howto/logging-cookbook.html
 """
-
-# Help with Python 3 compatibility, where the print statement is a function, an
-# implicit relative import is invalid, and the '/' operator performs true
-# division.  Example:  print 'hello world' raises a 'SyntaxError' exception.
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import unicode_literals
 
 import logging
 import time
 
-import tuf
-import tuf.settings
-import tuf.exceptions
+from securesystemslib import exceptions as sslib_exceptions
+from securesystemslib import formats as sslib_formats
 
-import securesystemslib.formats
+from tuf import exceptions
+from tuf import settings
+
 
 # Setting a handler's log level filters only logging messages of that level
 # (and above).  For example, setting the built-in StreamHandler's log level to
@@ -95,7 +88,7 @@ _FORMAT_STRING = '[%(asctime)s UTC] [%(name)s] [%(levelname)s] '+\
 
 # Ask all Formatter instances to talk GMT.  Set the 'converter' attribute of
 # 'logging.Formatter' so that all formatters use Greenwich Mean Time.
-# http://docs.python.org/2/library/logging.html#logging.Formatter.formatTime
+# http://docs.python.org/library/logging.html#logging.Formatter.formatTime
 # The 2nd paragraph in the link above contains the relevant information.
 # GMT = UTC (Coordinated Universal Time). TUF metadata stores timestamps in UTC.
 # We previously displayed the local time but this lead to confusion when
@@ -113,16 +106,20 @@ console_handler = None
 file_handler = None
 
 # Set the logger and its settings.
+# Note: we're configuring the top-level hierarchy for the tuf package,
+# therefore we explicitly request the 'tuf' logger, rather than following
+# the standard pattern of logging.getLogger(__name__)
 logger = logging.getLogger('tuf')
 logger.setLevel(_DEFAULT_LOG_LEVEL)
+logger.addHandler(logging.NullHandler())
 
 # Set the built-in file handler.  Messages will be logged to
 # 'settings.LOG_FILENAME', and only those messages with a log level of
 # '_DEFAULT_LOG_LEVEL'.  The log level of messages handled by 'file_handler'
 # may be modified with 'set_filehandler_log_level()'.  'settings.LOG_FILENAME'
 # will be opened in append mode.
-if tuf.settings.ENABLE_FILE_LOGGING:
-  file_handler = logging.FileHandler(tuf.settings.LOG_FILENAME)
+if settings.ENABLE_FILE_LOGGING:
+  file_handler = logging.FileHandler(settings.LOG_FILENAME)
   file_handler.setLevel(_DEFAULT_FILE_LOG_LEVEL)
   file_handler.setFormatter(formatter)
   logger.addHandler(file_handler)
@@ -147,8 +144,8 @@ class ConsoleFilter(logging.Filter):
       http://stackoverflow.com/q/6177520
       http://stackoverflow.com/q/5875225
       http://bugs.python.org/issue6435
-      http://docs.python.org/2/howto/logging-cookbook.html#filters-contextual
-      http://docs.python.org/2/library/logging.html#logrecord-attributes
+      http://docs.python.org/howto/logging-cookbook.html#filters-contextual
+      http://docs.python.org/library/logging.html#logrecord-attributes
 
     <Arguments>
       record:
@@ -172,8 +169,8 @@ class ConsoleFilter(logging.Filter):
       # with too much data. Assuming that this filter is not applied to the
       # file logging handler, the user may always consult the file log for the
       # original exception traceback. The exc_info is explained here:
-      # http://docs.python.org/2/library/sys.html#sys.exc_info
-      exc_type, junk, junk = record.exc_info
+      # http://docs.python.org/library/sys.html#sys.exc_info
+      exc_type, _, _ = record.exc_info
 
       # Simply set the class name as the exception text.
       record.exc_text = exc_type.__name__
@@ -185,7 +182,7 @@ class ConsoleFilter(logging.Filter):
 
 
 
-def set_log_level(log_level=_DEFAULT_LOG_LEVEL):
+def set_log_level(log_level: int=_DEFAULT_LOG_LEVEL):
   """
   <Purpose>
     Allow the default log level to be overridden.  If 'log_level' is not
@@ -208,7 +205,7 @@ def set_log_level(log_level=_DEFAULT_LOG_LEVEL):
 
   # Does 'log_level' have the correct format?
   # Raise 'securesystems.exceptions.FormatError' if there is a mismatch.
-  securesystemslib.formats.LOGLEVEL_SCHEMA.check_match(log_level)
+  sslib_formats.LOGLEVEL_SCHEMA.check_match(log_level)
 
   logger.setLevel(log_level)
 
@@ -239,13 +236,13 @@ def set_filehandler_log_level(log_level=_DEFAULT_FILE_LOG_LEVEL):
 
   # Does 'log_level' have the correct format?
   # Raise 'securesystems.exceptions.FormatError' if there is a mismatch.
-  securesystemslib.formats.LOGLEVEL_SCHEMA.check_match(log_level)
+  sslib_formats.LOGLEVEL_SCHEMA.check_match(log_level)
 
   if file_handler:
     file_handler.setLevel(log_level)
 
   else:
-    raise tuf.exceptions.Error(
+    raise exceptions.Error(
         'File handler has not been set.  Enable file logging'
         ' before attempting to set its log level')
 
@@ -265,7 +262,7 @@ def set_console_log_level(log_level=_DEFAULT_CONSOLE_LOG_LEVEL):
       'log_level' examples: logging.INFO; logging.CRITICAL.
 
   <Exceptions>
-    securesystems.exceptions.Error, if the 'log.py' console handler has not
+    securesystemslib.exceptions.Error, if the 'log.py' console handler has not
     been set yet with add_console_handler().
 
   <Side Effects>
@@ -277,17 +274,14 @@ def set_console_log_level(log_level=_DEFAULT_CONSOLE_LOG_LEVEL):
 
   # Does 'log_level' have the correct format?
   # Raise 'securesystems.exceptions.FormatError' if there is a mismatch.
-  securesystemslib.formats.LOGLEVEL_SCHEMA.check_match(log_level)
-
-  # Assign to the global console_handler object.
-  global console_handler
+  sslib_formats.LOGLEVEL_SCHEMA.check_match(log_level)
 
   if console_handler is not None:
     console_handler.setLevel(log_level)
 
   else:
     message = 'The console handler has not been set with add_console_handler().'
-    raise securesystemslib.exceptions.Error(message)
+    raise sslib_exceptions.Error(message)
 
 
 
@@ -316,7 +310,7 @@ def add_console_handler(log_level=_DEFAULT_CONSOLE_LOG_LEVEL):
 
   # Does 'log_level' have the correct format?
   # Raise 'securesystems.exceptions.FormatError' if there is a mismatch.
-  securesystemslib.formats.LOGLEVEL_SCHEMA.check_match(log_level)
+  sslib_formats.LOGLEVEL_SCHEMA.check_match(log_level)
 
   # Assign to the global console_handler object.
   global console_handler
@@ -377,7 +371,7 @@ def remove_console_handler():
 
 
 
-def enable_file_logging(log_filename=tuf.settings.LOG_FILENAME):
+def enable_file_logging(log_filename=settings.LOG_FILENAME):
   """
   <Purpose>
     Log messages to a file (i.e., 'log_filename').  The log level for the file
@@ -402,7 +396,7 @@ def enable_file_logging(log_filename=tuf.settings.LOG_FILENAME):
   """
 
   # Are the arguments properly formatted?
-  securesystemslib.formats.PATH_SCHEMA.check_match(log_filename)
+  sslib_formats.PATH_SCHEMA.check_match(log_filename)
 
   global file_handler
 
@@ -414,7 +408,7 @@ def enable_file_logging(log_filename=tuf.settings.LOG_FILENAME):
     logger.addHandler(file_handler)
 
   else:
-    raise tuf.exceptions.Error(
+    raise exceptions.Error(
         'The file handler has already been been set.  A new file handler'
         ' can be set by first calling disable_file_logging()')
 
@@ -446,6 +440,7 @@ def disable_file_logging():
 
   if file_handler:
     logger.removeHandler(file_handler)
+    file_handler.close()
     file_handler = None
     logger.debug('Removed the file handler.')
 

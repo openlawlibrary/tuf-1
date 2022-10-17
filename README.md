@@ -1,34 +1,75 @@
-A Framework for Securing Software Update Systems
-------------------------------------------------
+# <img src="https://cdn.rawgit.com/theupdateframework/artwork/3a649fa6/tuf-logo.svg" height="100" valign="middle" alt="TUF"/> A Framework for Securing Software Update Systems
 
-[![Travis-CI](https://travis-ci.org/theupdateframework/tuf.svg?branch=develop)](https://travis-ci.org/theupdateframework/tuf)
-[![Coveralls](https://coveralls.io/repos/theupdateframework/tuf/badge.svg?branch=develop)](https://coveralls.io/r/theupdateframework/tuf?branch=develop)
-[![PyUp](https://pyup.io/repos/github/theupdateframework/tuf/shield.svg)](https://pyup.io/repos/github/theupdateframework/tuf/)
-[![Python 3](https://pyup.io/repos/github/theupdateframework/tuf/python-3-shield.svg)](https://pyup.io/repos/github/theupdateframework/tuf/)
-[![FOSSA](https://app.fossa.io/api/projects/git%2Bgithub.com%2Ftheupdateframework%2Ftuf.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Ftheupdateframework%2Ftuf?ref=badge_shield)
+![Build](https://github.com/theupdateframework/python-tuf/workflows/Run%20TUF%20tests%20and%20linter/badge.svg)
+[![Coveralls](https://coveralls.io/repos/theupdateframework/python-tuf/badge.svg?branch=develop)](https://coveralls.io/r/theupdateframework/python-tuf?branch=develop)
+[![Docs](https://readthedocs.org/projects/theupdateframework/badge/)](https://theupdateframework.readthedocs.io/)
 [![CII](https://bestpractices.coreinfrastructure.org/projects/1351/badge)](https://bestpractices.coreinfrastructure.org/projects/1351)
+[![PyPI](https://img.shields.io/pypi/v/tuf)](https://pypi.org/project/tuf/)
 
-# <img src="https://cdn.rawgit.com/theupdateframework/artwork/3a649fa6/tuf-logo.svg" height="100" valign="middle" alt="TUF"/>
+----------------------------
+*__IMPORTANT NOTICE:__ A stable 1.0.0 release of the modern implementation only
+is scheduled for January 2022. Please see the [*1.0.0
+announcement*](docs/1.0.0-ANNOUNCEMENT.md) page for more details about the release
+and the deprecation of the legacy implementation, including migration
+instructions.*
 
-The Update Framework (TUF) helps developers maintain the security of a software
-update system, even against attackers that compromise the repository or signing
-keys. TUF provides a flexible framework and specification that developers can
-adopt into any software update system.
+----------------------------
+This repository is the **reference implementation** of
+[The Update Framework (TUF)](https://theupdateframework.github.io/).
+It is written in Python and intended to conform to version 1.0 of the
+[TUF specification](https://theupdateframework.github.io/specification/latest/).
+
+Python-TUF provides two APIs:
+  * [`tuf.api.metadata`](https://theupdateframework.readthedocs.io/en/latest/api/tuf.api.html),
+    a "low-level" API, designed to provide easy and safe access to TUF
+    metadata and to handle (de)serialization from/to files.
+  * [`tuf.ngclient`](https://theupdateframework.readthedocs.io/en/latest/api/tuf.ngclient.html),
+    a client implementation built on top of the metadata API.
+
+High-level support for implementing
+[repository operations](https://theupdateframework.github.io/specification/latest/#repository-operations)
+is planned but not yet provided: see [1.0.0 plans](docs/1.0.0-ANNOUNCEMENT.md).
+
+In addition to these APIs the project also provides a *legacy
+implementation* with `tuf.client` implementing the client workflow and
+`tuf.repository_tool` providing a high-level interface for repository
+operations. The legacy implementation is going to be
+[deprecated](docs/1.0.0-ANNOUNCEMENT.md) in the near future.
+
+The reference implementation strives to be a readable guide and demonstration
+for those working on implementing TUF in their own languages, environments, or
+update systems.
+
+
+About The Update Framework
+--------------------------
+The Update Framework (TUF) design helps developers maintain the security of a
+software update system, even against attackers that compromise the repository
+or signing keys.
+TUF provides a flexible
+[specification](https://github.com/theupdateframework/specification/blob/master/tuf-spec.md)
+defining functionality that developers can use in any software update system or
+re-implement to fit their needs.
 
 TUF is hosted by the [Linux Foundation](https://www.linuxfoundation.org/) as
 part of the [Cloud Native Computing Foundation](https://www.cncf.io/) (CNCF)
-and is used [in production](docs/ADOPTERS.md) by companies such as Cloudflare, 
-DataDog, DigitalOcean, Docker, Flynn, IBM, Kolide, LEAP, Microsoft, RedHat, 
-and VMware. A variant of TUF called [Uptane](https://uptane.github.io/) is 
-widely used to secure over-the-air updates in automobiles.
+and its design is [used in production](https://theupdateframework.io/adoptions/)
+by various tech companies and open source organizations. A variant of TUF
+called [Uptane](https://uptane.github.io/) is used to secure over-the-air
+updates in automobiles.
+
+Please see the [TUF Introduction](docs/OVERVIEW.rst) and
+[TUF's website](https://theupdateframework.com/) for more information about TUF!
 
 
 Documentation
 -------------
-* [Overview](docs/OVERVIEW.rst)
-* [Specification](https://github.com/theupdateframework/specification/blob/master/tuf-spec.md)
-* [Getting Started](docs/GETTING_STARTED.rst)
+* [Introduction to TUF's Design](docs/OVERVIEW.rst)
+* [The TUF Specification](https://theupdateframework.github.io/specification/latest/)
+* Examples: [client](examples/client_example) and [repository](examples/repo_example)
+* [API Reference](https://theupdateframework.readthedocs.io/)
 * [Governance](docs/GOVERNANCE.md) and [Maintainers](docs/MAINTAINERS.txt)
+for the reference implementation
 * [Miscellaneous Docs](docs/)
 
 
@@ -62,6 +103,12 @@ The issue tracker is intended for bug reports and to make feature requests.
 Major feature requests, such as design changes to the specification, should
 be proposed via a [TUF Augmentation Proposal](docs/TAP.rst) (TAP).
 
+Limitations
+-----------
+
+The reference implementation may behave unexpectedly when concurrently
+downloading the same target files with the same TUF client.
+
 License
 -------
 
@@ -73,15 +120,16 @@ Please see [LICENSE-MIT](LICENSE-MIT) and [LICENSE](LICENSE).
 Acknowledgements
 ----------------
 
-This project is managed by Prof. [Justin
-Cappos](https://ssl.engineering.nyu.edu/personalpages/jcappos/) and other
+This project is hosted by the Linux Foundation under the Cloud Native Computing
+Foundation.  TUF's early development was managed by
 members of the [Secure Systems Lab](https://ssl.engineering.nyu.edu/) at [New
 York University](https://engineering.nyu.edu/).  We appreciate the efforts of
 Konstantin Andrianov, Geremy Condra, Vladimir Diaz, Yuyu Zheng, Sebastien Awwad,
-and Justin Samuel who are among those who helped significantly with TUf's reference 
-implementation.  [Contributors](https://github.com/theupdateframework/tuf/blob/develop/docs/AUTHORS.txt)
+Santiago Torres-Arias, Trishank Kuppusamy, Zane Fisher, Pankhuri Goyal, Tian Tian,
+Konstantin Andrianov, and Justin Samuel who are among those who helped significantly
+with TUF's reference implementation.  [Contributors](https://github.com/theupdateframework/python-tuf/blob/develop/docs/AUTHORS.txt)
 and
-[maintainers](https://github.com/theupdateframework/tuf/blob/develop/docs/MAINTAINERS.txt)
+[maintainers](https://github.com/theupdateframework/python-tuf/blob/develop/docs/MAINTAINERS.txt)
 are governed by the [CNCF Community Code of
 Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
 

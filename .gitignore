@@ -3,6 +3,9 @@ dist/*
 build/*
 env/*
 
+# docs build directory
+docs/build/*
+
 # global file patterns
 *.log
 *.pyc
@@ -14,4 +17,17 @@ env/*
 .tox/*
 tests/htmlcov/*
 .DS_Store
+.pybuild/*
 .python-version
+*~
+*.tmp
+.pre-commit-config.yaml
+.vscode
+
+# Debian generated files
+debian/.debhelper/*
+debian/*-stamp
+debian/files
+debian/*.debhelper
+debian/*.substvars
+debian/python*-tuf/*
