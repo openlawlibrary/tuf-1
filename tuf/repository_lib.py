@@ -2004,7 +2004,6 @@ def sign_metadata(metadata_object, keyids, filename, repository_name):
     key = keydb.get_key(keyid, repository_name=repository_name)
     # Generate the signature using the appropriate signing method.
     if key['keytype'] in SUPPORTED_KEY_TYPES:
-      # signed = signable['signed'] #TODO: uncomment if encode_canonical works!
       signed = sslib_formats.encode_canonical(signable['signed']).encode('utf-8')
       if 'private' in key['keyval'] and key['keyval']['private']:
         try:
