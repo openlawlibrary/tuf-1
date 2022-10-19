@@ -1,14 +1,81 @@
-# Build-system section
 [build-system]
-requires = ["setuptools>=40.8.0", "wheel"]
-build-backend = "setuptools.build_meta"
+# hatchling pinned for reproducibility: version should be kept up-to-date
+requires = ["hatchling==0.22.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "oll-tuf"
+description = "A secure updater framework for Python"
+readme = "README.md"
+license = { text = "MIT OR Apache-2.0" }
+requires-python = ">=3.7"
+authors = [
+  { email = "theupdateframework@googlegroups.com" },
+]
+keywords = [
+  "authentication",
+  "compromise",
+  "key",
+  "revocation",
+  "secure",
+  "update",
+  "updater",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "License :: OSI Approved :: MIT License",
+  "Natural Language :: English",
+  "Operating System :: MacOS :: MacOS X",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.7",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Security",
+  "Topic :: Software Development",
+]
+dependencies = [
+  "requests>=2.19.1",
+  "securesystemslib>=0.20.0",
+]
+dynamic = ["version"]
+
+[project.urls]
+Documentation = "https://theupdateframework.readthedocs.io/en/stable/"
+Homepage = "https://www.updateframework.com"
+Issues = "https://github.com/theupdateframework/python-tuf/issues"
+Source = "https://github.com/theupdateframework/python-tuf"
+
+[tool.hatch.version]
+path = "tuf/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/docs",
+  "/examples",
+  "/tests",
+  "/tuf",
+  "/requirements*.txt",
+  "/tox.ini",
+  "/setup.py",
+]
+
+[tool.hatch.build.targets.wheel]
+# The testing phase changes the current working directory to `tests` but the test scripts import
+# from `tests` so the root directory must be added to Python's path for editable installations
+dev-mode-dirs = ["."]
 
 # Black section
 # Read more here: https://black.readthedocs.io/en/stable/usage_and_configuration/the_basics.html#configuration-via-a-file
 [tool.black]
 line-length=80
-# TODO: remove "excludes" after deleting old test files
-exclude="tests/.*old.py"
 
 # Isort section
 # Read more here: https://pycqa.github.io/isort/docs/configuration/config_files.html
@@ -16,8 +83,6 @@ exclude="tests/.*old.py"
 profile="black"
 line_length=80
 known_first_party = ["tuf"]
-# TODO: remove "skip_glob" after deleting old test files
-skip_glob="*old.py"
 
 # Pylint section
 
@@ -59,8 +124,6 @@ module-rgx="^(_?[a-z][a-z0-9_]*|__init__)$"
 no-docstring-rgx="(__.*__|main|test.*|.*test|.*Test)$"
 variable-rgx="^[a-z][a-z0-9_]*$"
 docstring-min-length=10
-# TODO: remove "ignore-patterns" after deleting old test files
-ignore-patterns=".*_old.py"
 
 [tool.pylint.logging]
 logging-format-style="old"
@@ -83,11 +146,10 @@ disallow_untyped_defs = "True"
 disallow_untyped_calls = "True"
 show_error_codes = "True"
 disable_error_code = ["attr-defined"]
-# TODO: remove "exclude" after deleting old test files
-exclude=".*_old.py"
 
 [[tool.mypy.overrides]]
 module = [
+  "requests.*",
   "securesystemslib.*",
   "urllib3.*"
 ]
