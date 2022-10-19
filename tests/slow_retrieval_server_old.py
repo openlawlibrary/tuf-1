@@ -26,38 +26,37 @@ import time
 import http.server
 
 
-
 # HTTP request handler.
 class Handler(http.server.BaseHTTPRequestHandler):
 
-  # Overwrite do_GET.
-  def do_GET(self):
-    current_dir = os.getcwd()
-    try:
-      filepath = os.path.join(current_dir, self.path.lstrip('/'))
-      data = None
-      with open(filepath, 'r') as fileobj:
-        data = fileobj.read()
+    # Overwrite do_GET.
+    def do_GET(self):
+        current_dir = os.getcwd()
+        try:
+            filepath = os.path.join(current_dir, self.path.lstrip("/"))
+            data = None
+            with open(filepath, "r") as fileobj:
+                data = fileobj.read()
 
-      self.send_response(200)
-      self.send_header('Content-length', str(len(data)))
-      self.end_headers()
+            self.send_response(200)
+            self.send_header("Content-length", str(len(data)))
+            self.end_headers()
 
-      # Before sending any data, the server does nothing for a long time.
-      DELAY = 40
-      time.sleep(DELAY)
-      self.wfile.write((data.encode('utf-8')))
+            # Before sending any data, the server does nothing for a long time.
+            DELAY = 40
+            time.sleep(DELAY)
+            self.wfile.write((data.encode("utf-8")))
 
-    except IOError as e:
-      self.send_error(404, 'File Not Found!')
+        except IOError as e:
+            self.send_error(404, "File Not Found!")
 
 
+if __name__ == "__main__":
+    server_address = ("localhost", 0)
 
-if __name__ == '__main__':
-  server_address = ('localhost', 0)
-
-  httpd = http.server.HTTPServer(server_address, Handler)
-  port_message = 'bind succeeded, server port is: ' \
-      + str(httpd.server_address[1])
-  print(port_message)
-  httpd.serve_forever()
+    httpd = http.server.HTTPServer(server_address, Handler)
+    port_message = "bind succeeded, server port is: " + str(
+        httpd.server_address[1]
+    )
+    print(port_message)
+    httpd.serve_forever()

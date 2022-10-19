@@ -34,26 +34,31 @@ import ssl
 import os
 import http.server
 
-keyfile = os.path.join('ssl_certs', 'ssl_cert.key')
-certfile = os.path.join('ssl_certs', 'ssl_cert.crt')
+keyfile = os.path.join("ssl_certs", "ssl_cert.key")
+certfile = os.path.join("ssl_certs", "ssl_cert.crt")
 
 
 if len(sys.argv) > 1 and os.path.exists(sys.argv[1]):
     certfile = sys.argv[1]
 
-httpd = http.server.HTTPServer(('localhost', 0),
-   http.server.SimpleHTTPRequestHandler)
+httpd = http.server.HTTPServer(
+    ("localhost", 0), http.server.SimpleHTTPRequestHandler
+)
 
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 context.load_cert_chain(certfile, keyfile)
 httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
-port_message = 'bind succeeded, server port is: ' \
-    + str(httpd.server_address[1])
+port_message = "bind succeeded, server port is: " + str(httpd.server_address[1])
 print(port_message)
 
 if len(sys.argv) > 1 and certfile != sys.argv[1]:
-  print('simple_https_server_old: cert file was not found: ' + sys.argv[1] +
-      '; using default: ' + certfile + " certfile")
+    print(
+        "simple_https_server_old: cert file was not found: "
+        + sys.argv[1]
+        + "; using default: "
+        + certfile
+        + " certfile"
+    )
 
 httpd.serve_forever()
