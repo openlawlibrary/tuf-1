@@ -1,11 +1,10 @@
 """
 A TUF hash bin delegation example using the low-level TUF Metadata API.
 
-As 'repository_tool' and 'repository_lib' are being deprecated, hash bin
-delegation interfaces are no longer available in this implementation. The
-example code in this file demonstrates how to easily implement those
-interfaces, and how to use them together with the TUF metadata API, to perform
-hash bin delegation.
+The example code in this file demonstrates how to *manually* perform hash bin
+delegation using the low-level Metadata API. It implements similar
+functionality to that of the deprecated legacy 'repository_tool' and
+'repository_lib'. (see ADR-0010 for details about repository library design)
 
 Contents:
 - Re-usable hash bin delegation helpers
@@ -19,7 +18,6 @@ NOTE: Metadata files will be written to a 'tmp*'-directory in CWD.
 import hashlib
 import os
 import tempfile
-from collections import OrderedDict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Tuple
@@ -43,8 +41,7 @@ def _in(days: float) -> datetime:
     return datetime.utcnow().replace(microsecond=0) + timedelta(days=days)
 
 
-SPEC_VERSION = "1.0.19"
-roles: Dict[str, Metadata] = {}
+roles: Dict[str, Metadata[Targets]] = {}
 keys: Dict[str, Dict[str, Any]] = {}
 
 # Hash bin delegation
@@ -75,7 +72,7 @@ PREFIX_LEN = len(f"{(NUMBER_OF_BINS - 1):x}")  # ... 2.
 # Compared to decimal, hexadecimal numbers can express higher numbers with
 # fewer digits and thus further decrease metadata sizes. With the above prefix
 # length of 2 we can represent at most ...
-NUMBER_OF_PREFIXES = 16 ** PREFIX_LEN  # ... 256 prefixes, i.e. 00, 01, ..., ff.
+NUMBER_OF_PREFIXES = 16**PREFIX_LEN  # ... 256 prefixes, i.e. 00, 01, ..., ff.
 #
 # If the number of bins is a power of two, hash prefixes are evenly distributed
 # over all bins, which allows to calculate the uniform size of ...
@@ -148,22 +145,11 @@ for name in ["bin-n", "bins"]:
 
 # Create preliminary delegating targets role (bins) and add public key for
 # delegated targets (bin_n) to key store. Delegation details are update below.
-roles["bins"] = Metadata[Targets](
-    signed=Targets(
-        version=1,
-        spec_version=SPEC_VERSION,
-        expires=_in(365),
-        targets={},
-        delegations=Delegations(
-            keys={
-                keys["bin-n"]["keyid"]: Key.from_securesystemslib_key(
-                    keys["bin-n"]
-                )
-            },
-            roles=OrderedDict(),
-        ),
-    ),
-    signatures=OrderedDict(),
+roles["bins"] = Metadata(Targets(expires=_in(365)))
+bin_n_key = Key.from_securesystemslib_key(keys["bin-n"])
+roles["bins"].signed.delegations = Delegations(
+    keys={bin_n_key.keyid: bin_n_key},
+    roles={},
 )
 
 # The hash bin generator yields an ordered list of incremental hash bin names
@@ -174,6 +160,7 @@ roles["bins"] = Metadata[Targets](
 #              10-17                       10 11 12 13 14 15 16 17
 #              ...                         ...
 #              f8-ff                       f8 f9 fa fb fc fd fe ff
+assert roles["bins"].signed.delegations.roles is not None
 for bin_n_name, bin_n_hash_prefixes in generate_hash_bins():
     # Update delegating targets role (bins) with delegation details for each
     # delegated targets role (bin_n).
@@ -186,12 +173,7 @@ for bin_n_name, bin_n_hash_prefixes in generate_hash_bins():
     )
 
     # Create delegated targets roles (bin_n)
-    roles[bin_n_name] = Metadata[Targets](
-        signed=Targets(
-            version=1, spec_version=SPEC_VERSION, expires=_in(7), targets={}
-        ),
-        signatures=OrderedDict(),
-    )
+    roles[bin_n_name] = Metadata(Targets(expires=_in(7)))
 
 # Add target file
 # ---------------
@@ -216,11 +198,11 @@ roles[bin_for_target].signed.targets[target_path] = target_file_info
 
 # Sign and persist
 # ----------------
-# Sign all metadata and persist to temporary directory at CWD for review
-# (most notably see 'bins.json' and '80-87.json').
+# Sign all metadata and write to temporary directory at CWD for review using
+# versioned file names. Most notably see '1.bins.json' and '1.80-87.json'.
 
 # NOTE: See "Persist metadata" paragraph in 'basic_repo.py' example for more
-# details about serialization formats and metadata file name convention.
+# details about serialization formats and metadata file name conventions.
 PRETTY = JSONSerializer(compact=False)
 TMP_DIR = tempfile.mkdtemp(dir=os.getcwd())
 
@@ -229,6 +211,6 @@ for role_name, role in roles.items():
     signer = SSlibSigner(key)
     role.sign(signer)
 
-    filename = f"{role_name}.json"
+    filename = f"1.{role_name}.json"
     filepath = os.path.join(TMP_DIR, filename)
     role.to_file(filepath, serializer=PRETTY)
