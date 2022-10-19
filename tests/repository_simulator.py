@@ -44,12 +44,11 @@ Example::
     updater.refresh()
 """
 
+import datetime
 import logging
 import os
 import tempfile
-from collections import OrderedDict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 from typing import Dict, Iterator, List, Optional, Tuple
 from urllib import parse
 
@@ -57,6 +56,7 @@ import securesystemslib.hash as sslib_hash
 from securesystemslib.keys import generate_ed25519_key
 from securesystemslib.signer import SSlibSigner
 
+from tuf.api.exceptions import DownloadHTTPError
 from tuf.api.metadata import (
     SPECIFICATION_VERSION,
     TOP_LEVEL_ROLE_NAMES,
@@ -65,15 +65,14 @@ from tuf.api.metadata import (
     Key,
     Metadata,
     MetaFile,
-    Role,
     Root,
     Snapshot,
+    SuccinctRoles,
     TargetFile,
     Targets,
     Timestamp,
 )
 from tuf.api.serialization.json import JSONSerializer
-from tuf.exceptions import FetcherHTTPError
 from tuf.ngclient.fetcher import FetcherInterface
 
 logger = logging.getLogger(__name__)
@@ -126,8 +125,10 @@ class RepositorySimulator(FetcherInterface):
 
         self.fetch_tracker = FetchTracker()
 
-        now = datetime.utcnow()
-        self.safe_expiry = now.replace(microsecond=0) + timedelta(days=30)
+        now = datetime.datetime.utcnow()
+        self.safe_expiry = now.replace(microsecond=0) + datetime.timedelta(
+            days=30
+        )
 
         self._initialize()
 
@@ -163,29 +164,28 @@ class RepositorySimulator(FetcherInterface):
             self.signers[role] = {}
         self.signers[role][signer.key_dict["keyid"]] = signer
 
+    def rotate_keys(self, role: str) -> None:
+        """remove all keys for role, then add threshold of new keys"""
+        self.root.roles[role].keyids.clear()
+        self.signers[role].clear()
+        for _ in range(0, self.root.roles[role].threshold):
+            key, signer = self.create_key()
+            self.root.add_key(key, role)
+            self.add_signer(role, signer)
+
     def _initialize(self) -> None:
         """Setup a minimal valid repository."""
 
-        targets = Targets(1, SPEC_VER, self.safe_expiry, {}, None)
-        self.md_targets = Metadata(targets, OrderedDict())
-
-        meta = {"targets.json": MetaFile(targets.version)}
-        snapshot = Snapshot(1, SPEC_VER, self.safe_expiry, meta)
-        self.md_snapshot = Metadata(snapshot, OrderedDict())
-
-        snapshot_meta = MetaFile(snapshot.version)
-        timestamp = Timestamp(1, SPEC_VER, self.safe_expiry, snapshot_meta)
-        self.md_timestamp = Metadata(timestamp, OrderedDict())
-
-        roles = {role_name: Role([], 1) for role_name in TOP_LEVEL_ROLE_NAMES}
-        root = Root(1, SPEC_VER, self.safe_expiry, {}, roles, True)
+        self.md_targets = Metadata(Targets(expires=self.safe_expiry))
+        self.md_snapshot = Metadata(Snapshot(expires=self.safe_expiry))
+        self.md_timestamp = Metadata(Timestamp(expires=self.safe_expiry))
+        self.md_root = Metadata(Root(expires=self.safe_expiry))
 
         for role in TOP_LEVEL_ROLE_NAMES:
             key, signer = self.create_key()
-            root.add_key(role, key)
+            self.md_root.signed.add_key(key, role)
             self.add_signer(role, signer)
 
-        self.md_root = Metadata(root, OrderedDict())
         self.publish_root()
 
     def publish_root(self) -> None:
@@ -197,7 +197,7 @@ class RepositorySimulator(FetcherInterface):
         self.signed_roots.append(self.md_root.to_bytes(JSONSerializer()))
         logger.debug("Published root v%d", self.root.version)
 
-    def fetch(self, url: str) -> Iterator[bytes]:
+    def _fetch(self, url: str) -> Iterator[bytes]:
         """Fetches data from the given url and returns an Iterator (or yields
         bytes).
         """
@@ -230,7 +230,7 @@ class RepositorySimulator(FetcherInterface):
 
             yield self.fetch_target(target_path, prefix)
         else:
-            raise FetcherHTTPError(f"Unknown path '{path}'", 404)
+            raise DownloadHTTPError(f"Unknown path '{path}'", 404)
 
     def fetch_target(
         self, target_path: str, target_hash: Optional[str]
@@ -243,12 +243,12 @@ class RepositorySimulator(FetcherInterface):
 
         repo_target = self.target_files.get(target_path)
         if repo_target is None:
-            raise FetcherHTTPError(f"No target {target_path}", 404)
+            raise DownloadHTTPError(f"No target {target_path}", 404)
         if (
             target_hash
             and target_hash not in repo_target.target_file.hashes.values()
         ):
-            raise FetcherHTTPError(f"hash mismatch for {target_path}", 404)
+            raise DownloadHTTPError(f"hash mismatch for {target_path}", 404)
 
         logger.debug("fetched target %s", target_path)
         return repo_target.data
@@ -259,11 +259,13 @@ class RepositorySimulator(FetcherInterface):
         If version is None, non-versioned metadata is being requested.
         """
         self.fetch_tracker.metadata.append((role, version))
+        # decode role for the metadata
+        role = parse.unquote(role, encoding="utf-8")
 
         if role == Root.type:
             # return a version previously serialized in publish_root()
             if version is None or version > len(self.signed_roots):
-                raise FetcherHTTPError(f"Unknown root version {version}", 404)
+                raise DownloadHTTPError(f"Unknown root version {version}", 404)
             logger.debug("fetched root version %d", version)
             return self.signed_roots[version - 1]
 
@@ -279,7 +281,7 @@ class RepositorySimulator(FetcherInterface):
             md = self.md_delegates.get(role)
 
         if md is None:
-            raise FetcherHTTPError(f"Unknown role {role}", 404)
+            raise DownloadHTTPError(f"Unknown role {role}", 404)
 
         md.signatures.clear()
         for signer in self.signers[role].values():
@@ -333,46 +335,81 @@ class RepositorySimulator(FetcherInterface):
         self.snapshot.version += 1
         self.update_timestamp()
 
+    def _get_delegator(self, delegator_name: str) -> Targets:
+        """Given a delegator name return, its corresponding Targets object."""
+        if delegator_name == Targets.type:
+            return self.targets
+
+        return self.md_delegates[delegator_name].signed
+
     def add_target(self, role: str, data: bytes, path: str) -> None:
         """Create a target from data and add it to the target_files."""
-        if role == Targets.type:
-            targets = self.targets
-        else:
-            targets = self.md_delegates[role].signed
+        targets = self._get_delegator(role)
 
         target = TargetFile.from_data(path, data, ["sha256"])
         targets.targets[path] = target
         self.target_files[path] = RepositoryTarget(data, target)
 
     def add_delegation(
-        self,
-        delegator_name: str,
-        name: str,
-        targets: Targets,
-        terminating: bool,
-        paths: Optional[List[str]],
-        hash_prefixes: Optional[List[str]],
+        self, delegator_name: str, role: DelegatedRole, targets: Targets
     ) -> None:
         """Add delegated target role to the repository."""
-        if delegator_name == Targets.type:
-            delegator = self.targets
-        else:
-            delegator = self.md_delegates[delegator_name].signed
+        delegator = self._get_delegator(delegator_name)
+
+        if (
+            delegator.delegations is not None
+            and delegator.delegations.succinct_roles is not None
+        ):
+            raise ValueError("Can't add a role when succinct_roles is used")
 
         # Create delegation
-        role = DelegatedRole(name, [], 1, terminating, paths, hash_prefixes)
         if delegator.delegations is None:
-            delegator.delegations = Delegations({}, OrderedDict())
+            delegator.delegations = Delegations({}, roles={})
+
+        assert delegator.delegations.roles is not None
         # put delegation last by default
         delegator.delegations.roles[role.name] = role
 
         # By default add one new key for the role
         key, signer = self.create_key()
-        delegator.add_key(role.name, key)
+        delegator.add_key(key, role.name)
         self.add_signer(role.name, signer)
 
         # Add metadata for the role
-        self.md_delegates[role.name] = Metadata(targets, OrderedDict())
+        if role.name not in self.md_delegates:
+            self.md_delegates[role.name] = Metadata(targets, {})
+
+    def add_succinct_roles(
+        self, delegator_name: str, bit_length: int, name_prefix: str
+    ) -> None:
+        """Add succinct roles info to a delegator with name "delegator_name".
+
+        Note that for each delegated role represented by succinct roles an empty
+        Targets instance is created.
+        """
+        delegator = self._get_delegator(delegator_name)
+
+        if (
+            delegator.delegations is not None
+            and delegator.delegations.roles is not None
+        ):
+            raise ValueError(
+                "Can't add a succinct_roles when delegated roles are used"
+            )
+
+        key, signer = self.create_key()
+        succinct_roles = SuccinctRoles([], 1, bit_length, name_prefix)
+        delegator.delegations = Delegations({}, None, succinct_roles)
+
+        # Add targets metadata for all bins.
+        for delegated_name in succinct_roles.get_roles():
+            self.md_delegates[delegated_name] = Metadata(
+                Targets(expires=self.safe_expiry)
+            )
+
+            self.add_signer(delegated_name, signer)
+
+        delegator.add_key(key)
 
     def write(self) -> None:
         """Dump current repository metadata to self.dump_dir

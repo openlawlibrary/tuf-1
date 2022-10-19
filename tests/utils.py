@@ -23,6 +23,7 @@
 import argparse
 import errno
 import logging
+import os
 import queue
 import socket
 import subprocess
@@ -34,13 +35,13 @@ import warnings
 from contextlib import contextmanager
 from typing import IO, Any, Callable, Dict, Iterator, List, Optional
 
-import tuf.log
-
 logger = logging.getLogger(__name__)
+
+# May be used to reliably read other files in tests dir regardless of cwd
+TESTS_DIR = os.path.dirname(os.path.realpath(__file__))
 
 # Used when forming URLs on the client side
 TEST_HOST_ADDRESS = "127.0.0.1"
-
 
 # DataSet is only here so type hints can be used.
 DataSet = Dict[str, Any]
@@ -151,7 +152,14 @@ def configure_test_logging(argv: List[str]) -> None:
         loglevel = logging.DEBUG
 
     logging.basicConfig(level=loglevel)
-    tuf.log.set_log_level(loglevel)
+
+
+def cleanup_dir(path: str) -> None:
+    """Delete all files inside a directory"""
+    for filepath in [
+        os.path.join(path, filename) for filename in os.listdir(path)
+    ]:
+        os.remove(filepath)
 
 
 class TestServerProcess:
@@ -174,7 +182,7 @@ class TestServerProcess:
     def __init__(
         self,
         log: logging.Logger,
-        server: str = "simple_server.py",
+        server: str = os.path.join(TESTS_DIR, "simple_server.py"),
         timeout: int = 10,
         popen_cwd: str = ".",
         extra_cmd_args: Optional[List[str]] = None,
