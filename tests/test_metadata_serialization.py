@@ -12,51 +12,132 @@ import logging
 import sys
 import unittest
 
+from securesystemslib.signer import Signature
+
 from tests import utils
 from tuf.api.metadata import (
     DelegatedRole,
     Delegations,
     Key,
+    Metadata,
     MetaFile,
     Role,
     Root,
     Snapshot,
+    SuccinctRoles,
     TargetFile,
     Targets,
     Timestamp,
 )
+from tuf.api.serialization import DeserializationError
 
 logger = logging.getLogger(__name__)
 
 
+# pylint: disable=too-many-public-methods
 class TestSerialization(unittest.TestCase):
     """Test serialization for all classes in 'tuf/api/metadata.py'."""
+
+    invalid_metadata: utils.DataSet = {
+        "no signatures field": b'{"signed": \
+            { "_type": "timestamp", "spec_version": "1.0.0", "version": 1, "expires": "2030-01-01T00:00:00Z", \
+            "meta": {"snapshot.json": {"hashes": {"sha256" : "abc"}, "version": 1}}} \
+        }',
+        "non unique duplicating signatures": b'{"signed": \
+                { "_type": "timestamp", "spec_version": "1.0.0", "version": 1, "expires": "2030-01-01T00:00:00Z", \
+                "meta": {"snapshot.json": {"hashes": {"sha256" : "abc"}, "version": 1}}}, \
+            "signatures": [{"keyid": "id", "sig": "b"}, {"keyid": "id", "sig": "b"}] \
+        }',
+    }
+
+    @utils.run_sub_tests_with_dataset(invalid_metadata)
+    def test_invalid_metadata_serialization(self, test_data: bytes) -> None:
+        # We expect a DeserializationError reraised from ValueError or KeyError.
+        with self.assertRaises(DeserializationError):
+            Metadata.from_bytes(test_data)
+
+    valid_metadata: utils.DataSet = {
+        "multiple signatures": b'{ \
+            "signed": \
+                { "_type": "timestamp", "spec_version": "1.0.0", "version": 1, "expires": "2030-01-01T00:00:00Z", \
+                "meta": {"snapshot.json": {"hashes": {"sha256" : "abc"}, "version": 1}}}, \
+            "signatures": [{ "keyid": "id", "sig": "b"}, {"keyid": "id2", "sig": "d" }] \
+        }',
+        "no signatures": b'{ \
+            "signed": \
+                { "_type": "timestamp", "spec_version": "1.0.0", "version": 1, "expires": "2030-01-01T00:00:00Z", \
+                "meta": {"snapshot.json": {"hashes": {"sha256" : "abc"}, "version": 1}}}, \
+            "signatures": [] \
+        }',
+        "unrecognized fields": b'{ \
+            "signed": \
+                { "_type": "timestamp", "spec_version": "1.0.0", "version": 1, "expires": "2030-01-01T00:00:00Z", \
+                "meta": {"snapshot.json": {"hashes": {"sha256" : "abc"}, "version": 1}}}, \
+            "signatures": [{"keyid": "id", "sig": "b"}], \
+            "foo": "bar" \
+        }',
+    }
+
+    @utils.run_sub_tests_with_dataset(valid_metadata)
+    def test_valid_metadata_serialization(self, test_case_data: bytes) -> None:
+        md = Metadata.from_bytes(test_case_data)
+
+        # Convert to a JSON and sort the keys the way we do in JSONSerializer.
+        separators = (",", ":")
+        test_json = json.loads(test_case_data)
+        test_bytes = json.dumps(
+            test_json, separators=separators, sort_keys=True
+        ).encode("utf-8")
+
+        self.assertEqual(test_bytes, md.to_bytes())
+
+    invalid_signatures: utils.DataSet = {
+        "missing keyid attribute in a signature": '{ "sig": "abc" }',
+        "missing sig attribute in a signature": '{ "keyid": "id" }',
+    }
+
+    @utils.run_sub_tests_with_dataset(invalid_signatures)
+    def test_invalid_signature_serialization(self, test_data: str) -> None:
+        case_dict = json.loads(test_data)
+        with self.assertRaises(KeyError):
+            Signature.from_dict(case_dict)
+
+    valid_signatures: utils.DataSet = {
+        "all": '{ "keyid": "id", "sig": "b"}',
+        "unrecognized fields": '{ "keyid": "id", "sig": "b", "foo": "bar"}',
+    }
+
+    @utils.run_sub_tests_with_dataset(valid_signatures)
+    def test_signature_serialization(self, test_case_data: str) -> None:
+        case_dict = json.loads(test_case_data)
+        signature = Signature.from_dict(copy.copy(case_dict))
+        self.assertEqual(case_dict, signature.to_dict())
 
     # Snapshot instances with meta = {} are valid, but for a full valid
     # repository it's required that meta has at least one element inside it.
     invalid_signed: utils.DataSet = {
         "no _type": '{"spec_version": "1.0.0", "expires": "2030-01-01T00:00:00Z", "meta": {}}',
-        "no spec_version": '{"_type": "signed", "version": 1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
-        "no version": '{"_type": "signed", "spec_version": "1.0.0", "expires": "2030-01-01T00:00:00Z", "meta": {}}',
-        "no expires": '{"_type": "signed", "spec_version": "1.0.0", "version": 1, "meta": {}}',
+        "no spec_version": '{"_type": "snapshot", "version": 1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
+        "no version": '{"_type": "snapshot", "spec_version": "1.0.0", "expires": "2030-01-01T00:00:00Z", "meta": {}}',
+        "no expires": '{"_type": "snapshot", "spec_version": "1.0.0", "version": 1, "meta": {}}',
         "empty str _type": '{"_type": "", "spec_version": "1.0.0", "version": 1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
-        "empty str spec_version": '{"_type": "signed", "spec_version": "", "version": 1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
+        "empty str spec_version": '{"_type": "snapshot", "spec_version": "", "version": 1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
         "_type wrong type": '{"_type": "foo", "spec_version": "1.0.0", "version": 1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
-        "version wrong type": '{"_type": "signed", "spec_version": "1.0.0", "version": "a", "expires": "2030-01-01T00:00:00Z", "meta": {}}',
-        "invalid spec_version str": '{"_type": "signed", "spec_version": "abc", "version": 1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
-        "two digit spec_version": '{"_type": "signed", "spec_version": "1.2.a", "version": 1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
-        "no digit spec_version": '{"_type": "signed", "spec_version": "a.b.c", "version": 1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
-        "different major spec_version": '{"_type": "signed", "spec_version": "0.0.0", "version": 1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
-        "version 0": '{"_type": "signed", "spec_version": "1.0.0", "version": 0, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
-        "version below 0": '{"_type": "signed", "spec_version": "1.0.0", "version": -1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
-        "wrong datetime string": '{"_type": "signed", "spec_version": "1.0.0", "version": 1, "expires": "abc", "meta": {}}',
+        "version wrong type": '{"_type": "snapshot", "spec_version": "1.0.0", "version": "a", "expires": "2030-01-01T00:00:00Z", "meta": {}}',
+        "invalid spec_version str": '{"_type": "snapshot", "spec_version": "abc", "version": 1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
+        "non-number spec_version": '{"_type": "snapshot", "spec_version": "1.2.a", "version": 1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
+        "one part spec_version": '{"_type": "snapshot", "spec_version": "1", "version": 1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
+        "different major spec_version": '{"_type": "snapshot", "spec_version": "0.0.0", "version": 1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
+        "version 0": '{"_type": "snapshot", "spec_version": "1.0.0", "version": 0, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
+        "version below 0": '{"_type": "snapshot", "spec_version": "1.0.0", "version": -1, "expires": "2030-01-01T00:00:00Z", "meta": {}}',
+        "wrong datetime string": '{"_type": "snapshot", "spec_version": "1.0.0", "version": 1, "expires": "abc", "meta": {}}',
     }
 
     @utils.run_sub_tests_with_dataset(invalid_signed)
     def test_invalid_signed_serialization(self, test_case_data: str) -> None:
         case_dict = json.loads(test_case_data)
         with self.assertRaises((KeyError, ValueError, TypeError)):
-            Snapshot.from_dict(copy.deepcopy(case_dict))
+            Snapshot.from_dict(case_dict)
 
     valid_keys: utils.DataSet = {
         "all": '{"keytype": "rsa", "scheme": "rsassa-pss-sha256", \
@@ -89,12 +170,13 @@ class TestSerialization(unittest.TestCase):
         case_dict = json.loads(test_case_data)
         with self.assertRaises((TypeError, KeyError)):
             keyid = case_dict.pop("keyid")
-            Key.from_dict(keyid, copy.copy(case_dict))
+            Key.from_dict(keyid, case_dict)
 
     invalid_roles: utils.DataSet = {
         "no threshold": '{"keyids": ["keyid"]}',
         "no keyids": '{"threshold": 3}',
         "wrong threshold type": '{"keyids": ["keyid"], "threshold": "a"}',
+        "wrong keyids type": '{"keyids": 1, "threshold": 3}',
         "threshold below 1": '{"keyids": ["keyid"], "threshold": 0}',
         "duplicate keyids": '{"keyids": ["keyid", "keyid"], "threshold": 3}',
     }
@@ -103,11 +185,12 @@ class TestSerialization(unittest.TestCase):
     def test_invalid_role_serialization(self, test_case_data: str) -> None:
         case_dict = json.loads(test_case_data)
         with self.assertRaises((KeyError, TypeError, ValueError)):
-            Role.from_dict(copy.deepcopy(case_dict))
+            Role.from_dict(case_dict)
 
     valid_roles: utils.DataSet = {
         "all": '{"keyids": ["keyid"], "threshold": 3}',
         "many keyids": '{"keyids": ["a", "b", "c", "d", "e"], "threshold": 1}',
+        "ordered keyids": '{"keyids": ["c", "b", "a"], "threshold": 1}',
         "empty keyids": '{"keyids": [], "threshold": 1}',
         "unrecognized field": '{"keyids": ["keyid"], "threshold": 3, "foo": "bar"}',
     }
@@ -200,16 +283,20 @@ class TestSerialization(unittest.TestCase):
                 "snapshot": {"keyids": ["keyid2"], "threshold": 1}, \
                 "foo": {"keyids": ["keyid2"], "threshold": 1}} \
             }',
+        "invalid expiry with microseconds": '{"_type": "root", "spec_version": "1.0.0", "version": 1, \
+            "expires": "2030-01-01T12:00:00.123456Z", "consistent_snapshot": false, \
+            "keys": {}, "roles": {"root": {}, "timestamp": {}, "targets": {}, "snapshot": {}}}',
     }
 
     @utils.run_sub_tests_with_dataset(invalid_roots)
     def test_invalid_root_serialization(self, test_case_data: str) -> None:
         case_dict = json.loads(test_case_data)
         with self.assertRaises(ValueError):
-            Root.from_dict(copy.deepcopy(case_dict))
+            Root.from_dict(case_dict)
 
     invalid_metafiles: utils.DataSet = {
         "wrong length type": '{"version": 1, "length": "a", "hashes": {"sha256" : "abc"}}',
+        "version 0": '{"version": 0, "length": 1, "hashes": {"sha256" : "abc"}}',
         "length 0": '{"version": 1, "length": 0, "hashes": {"sha256" : "abc"}}',
         "length below 0": '{"version": 1, "length": -1, "hashes": {"sha256" : "abc"}}',
         "empty hashes dict": '{"version": 1, "length": 1, "hashes": {}}',
@@ -221,7 +308,7 @@ class TestSerialization(unittest.TestCase):
     def test_invalid_metafile_serialization(self, test_case_data: str) -> None:
         case_dict = json.loads(test_case_data)
         with self.assertRaises((TypeError, ValueError, AttributeError)):
-            MetaFile.from_dict(copy.deepcopy(case_dict))
+            MetaFile.from_dict(case_dict)
 
     valid_metafiles: utils.DataSet = {
         "all": '{"hashes": {"sha256" : "abc"}, "length": 12, "version": 1}',
@@ -245,10 +332,12 @@ class TestSerialization(unittest.TestCase):
     def test_invalid_timestamp_serialization(self, test_case_data: str) -> None:
         case_dict = json.loads(test_case_data)
         with self.assertRaises((ValueError, KeyError)):
-            Timestamp.from_dict(copy.deepcopy(case_dict))
+            Timestamp.from_dict(case_dict)
 
     valid_timestamps: utils.DataSet = {
         "all": '{ "_type": "timestamp", "spec_version": "1.0.0", "version": 1, "expires": "2030-01-01T00:00:00Z", \
+            "meta": {"snapshot.json": {"hashes": {"sha256" : "abc"}, "version": 1}}}',
+        "legacy spec_version": '{ "_type": "timestamp", "spec_version": "1.0", "version": 1, "expires": "2030-01-01T00:00:00Z", \
             "meta": {"snapshot.json": {"hashes": {"sha256" : "abc"}, "version": 1}}}',
         "unrecognized field": '{ "_type": "timestamp", "spec_version": "1.0.0", "version": 1, "expires": "2030-01-01T00:00:00Z", \
             "meta": {"snapshot.json": {"hashes": {"sha256" : "abc"}, "version": 1}}, "foo": "bar"}',
@@ -292,6 +381,8 @@ class TestSerialization(unittest.TestCase):
         "unrecognized field": '{"keyids": ["keyid"], "name": "a", "terminating": true, "paths": ["fn1"], "threshold": 3, "foo": "bar"}',
         "many keyids": '{"keyids": ["keyid1", "keyid2"], "name": "a", "paths": ["fn1", "fn2"], \
             "terminating": false, "threshold": 1}',
+        "ordered keyids": '{"keyids": ["keyid2", "keyid1"], "name": "a", "paths": ["fn1", "fn2"], \
+            "terminating": false, "threshold": 1}',
     }
 
     @utils.run_sub_tests_with_dataset(valid_delegated_roles)
@@ -317,7 +408,37 @@ class TestSerialization(unittest.TestCase):
     ) -> None:
         case_dict = json.loads(test_case_data)
         with self.assertRaises(ValueError):
-            DelegatedRole.from_dict(copy.copy(case_dict))
+            DelegatedRole.from_dict(case_dict)
+
+    valid_succinct_roles: utils.DataSet = {
+        # SuccinctRoles inherits Role and some use cases can be found in the valid_roles.
+        "standard succinct_roles information": '{"keyids": ["keyid"], "threshold": 1, \
+            "bit_length": 8, "name_prefix": "foo"}',
+        "succinct_roles with unrecognized fields": '{"keyids": ["keyid"], "threshold": 1, \
+            "bit_length": 8, "name_prefix": "foo", "foo": "bar"}',
+    }
+
+    @utils.run_sub_tests_with_dataset(valid_succinct_roles)
+    def test_succinct_roles_serialization(self, test_case_data: str) -> None:
+        case_dict = json.loads(test_case_data)
+        succinct_roles = SuccinctRoles.from_dict(copy.copy(case_dict))
+        self.assertDictEqual(case_dict, succinct_roles.to_dict())
+
+    invalid_succinct_roles: utils.DataSet = {
+        # SuccinctRoles inherits Role and some use cases can be found in the invalid_roles.
+        "missing bit_length from succinct_roles": '{"keyids": ["keyid"], "threshold": 1, "name_prefix": "foo"}',
+        "missing name_prefix from succinct_roles": '{"keyids": ["keyid"], "threshold": 1, "bit_length": 8}',
+        "succinct_roles with invalid bit_length type": '{"keyids": ["keyid"], "threshold": 1, "bit_length": "a", "name_prefix": "foo"}',
+        "succinct_roles with invalid name_prefix type": '{"keyids": ["keyid"], "threshold": 1, "bit_length": 8, "name_prefix": 1}',
+        "succinct_roles with high bit_length value": '{"keyids": ["keyid"], "threshold": 1, "bit_length": 50, "name_prefix": "foo"}',
+        "succinct_roles with low bit_length value": '{"keyids": ["keyid"], "threshold": 1, "bit_length": 0, "name_prefix": "foo"}',
+    }
+
+    @utils.run_sub_tests_with_dataset(invalid_succinct_roles)
+    def test_invalid_succinct_roles_serialization(self, test_data: str) -> None:
+        case_dict = json.loads(test_data)
+        with self.assertRaises((ValueError, KeyError, TypeError)):
+            SuccinctRoles.from_dict(case_dict)
 
     invalid_delegations: utils.DataSet = {
         "empty delegations": "{}",
@@ -370,6 +491,13 @@ class TestSerialization(unittest.TestCase):
                 {"keyids": ["keyid1"], "name": "b", "terminating": true, "paths": ["fn1"], "threshold": 3}, \
                 {"keyids": ["keyid2"], "name": "root", "terminating": true, "paths": ["fn2"], "threshold": 4} ] \
             }',
+        "roles and succinct_roles set": '{"keys": { \
+                "keyid1" : {"keytype": "rsa", "scheme": "rsassa-pss-sha256", "keyval": {"public": "foo"}}, \
+                "keyid2" : {"keytype": "ed25519", "scheme": "ed25519", "keyval": {"public": "bar"}}}, \
+            "roles": [ \
+                {"keyids": ["keyid"], "name": "a", "terminating": true, "paths": ["fn1"], "threshold": 3}, \
+                {"keyids": ["keyid2"], "name": "b", "terminating": true, "paths": ["fn2"], "threshold": 4} ], \
+            "succinct_roles": {"keyids": ["keyid"], "threshold": 1, "bit_length": 8, "name_prefix": "foo"}}',
     }
 
     @utils.run_sub_tests_with_dataset(invalid_delegations)
@@ -378,16 +506,20 @@ class TestSerialization(unittest.TestCase):
     ) -> None:
         case_dict = json.loads(test_case_data)
         with self.assertRaises((ValueError, KeyError, AttributeError)):
-            Delegations.from_dict(copy.deepcopy(case_dict))
+            Delegations.from_dict(case_dict)
 
     valid_delegations: utils.DataSet = {
-        "all": '{"keys": { \
+        "with roles": '{"keys": { \
                 "keyid1" : {"keytype": "rsa", "scheme": "rsassa-pss-sha256", "keyval": {"public": "foo"}}, \
                 "keyid2" : {"keytype": "ed25519", "scheme": "ed25519", "keyval": {"public": "bar"}}}, \
             "roles": [ \
                 {"keyids": ["keyid"], "name": "a", "terminating": true, "paths": ["fn1"], "threshold": 3}, \
                 {"keyids": ["keyid2"], "name": "b", "terminating": true, "paths": ["fn2"], "threshold": 4} ] \
             }',
+        "with succinct_roles": '{"keys": { \
+                "keyid1" : {"keytype": "rsa", "scheme": "rsassa-pss-sha256", "keyval": {"public": "foo"}}, \
+                "keyid2" : {"keytype": "ed25519", "scheme": "ed25519", "keyval": {"public": "bar"}}}, \
+            "succinct_roles": {"keyids": ["keyid"], "threshold": 1, "bit_length": 8, "name_prefix": "foo"}}',
         "unrecognized field": '{"keys": {"keyid" : {"keytype": "rsa", "scheme": "rsassa-pss-sha256", "keyval": {"public": "foo"}}}, \
             "roles": [ {"keyids": ["keyid"], "name": "a", "paths": ["fn1", "fn2"], "terminating": true, "threshold": 3} ], \
             "foo": "bar"}',
@@ -415,7 +547,7 @@ class TestSerialization(unittest.TestCase):
     ) -> None:
         case_dict = json.loads(test_case_data)
         with self.assertRaises(KeyError):
-            TargetFile.from_dict(copy.deepcopy(case_dict), "file1.txt")
+            TargetFile.from_dict(case_dict, "file1.txt")
 
     valid_targetfiles: utils.DataSet = {
         "all": '{"length": 12, "hashes": {"sha256" : "abc"}, \

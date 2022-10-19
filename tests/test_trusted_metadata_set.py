@@ -13,7 +13,7 @@ from securesystemslib.interface import (
 from securesystemslib.signer import SSlibSigner
 
 from tests import utils
-from tuf import exceptions
+from tuf.api import exceptions
 from tuf.api.metadata import (
     Metadata,
     MetaFile,
@@ -22,6 +22,7 @@ from tuf.api.metadata import (
     Targets,
     Timestamp,
 )
+from tuf.api.serialization.json import JSONSerializer
 from tuf.ngclient._internal.trusted_metadata_set import TrustedMetadataSet
 
 logger = logging.getLogger(__name__)
@@ -49,12 +50,12 @@ class TestTrustedMetadataSet(unittest.TestCase):
         metadata = Metadata.from_bytes(cls.metadata[rolename])
         modification_func(metadata.signed)
         metadata.sign(cls.keystore[rolename])
-        return metadata.to_bytes()
+        return metadata.to_bytes(JSONSerializer(validate=True))
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.repo_dir = os.path.join(
-            os.getcwd(), "repository_data", "repository", "metadata"
+            utils.TESTS_DIR, "repository_data", "repository", "metadata"
         )
         cls.metadata = {}
         for md in [
@@ -68,7 +69,9 @@ class TestTrustedMetadataSet(unittest.TestCase):
             with open(os.path.join(cls.repo_dir, f"{md}.json"), "rb") as f:
                 cls.metadata[md] = f.read()
 
-        keystore_dir = os.path.join(os.getcwd(), "repository_data", "keystore")
+        keystore_dir = os.path.join(
+            utils.TESTS_DIR, "repository_data", "keystore"
+        )
         cls.keystore = {}
         root_key_dict = import_rsa_privatekey_from_file(
             os.path.join(keystore_dir, Root.type + "_key"), password="password"
@@ -237,15 +240,17 @@ class TestTrustedMetadataSet(unittest.TestCase):
         self.trusted_set.update_root(root)
 
     def test_update_root_new_root_fail_threshold_verification(self) -> None:
-        # new_root data with threshold which cannot be verified.
-        root = Metadata.from_bytes(self.metadata[Root.type])
-        # remove root role keyids representing root signatures
-        root.signed.roles[Root.type].keyids = set()
+        # Increase threshold in new root, do not add enough keys
+        def root_threshold_bump(root: Root) -> None:
+            root.version += 1
+            root.roles[Root.type].threshold += 1
+
+        root = self.modify_metadata(Root.type, root_threshold_bump)
         with self.assertRaises(exceptions.UnsignedMetadataError):
-            self.trusted_set.update_root(root.to_bytes())
+            self.trusted_set.update_root(root)
 
     def test_update_root_new_root_ver_same_as_trusted_root_ver(self) -> None:
-        with self.assertRaises(exceptions.ReplayedMetadataError):
+        with self.assertRaises(exceptions.BadVersionNumberError):
             self.trusted_set.update_root(self.metadata[Root.type])
 
     def test_root_expired_final_root(self) -> None:
@@ -266,19 +271,35 @@ class TestTrustedMetadataSet(unittest.TestCase):
 
         timestamp = self.modify_metadata(Timestamp.type, version_modifier)
         self.trusted_set.update_timestamp(timestamp)
-        with self.assertRaises(exceptions.ReplayedMetadataError):
+        with self.assertRaises(exceptions.BadVersionNumberError):
             self.trusted_set.update_timestamp(self.metadata[Timestamp.type])
+
+    def test_update_timestamp_with_same_timestamp(self) -> None:
+        # Test that timestamp is NOT updated if:
+        # new_timestamp.version == trusted_timestamp.version
+        self.trusted_set.update_timestamp(self.metadata[Timestamp.type])
+        initial_timestamp = self.trusted_set.timestamp
+
+        # Update timestamp with the same version.
+        with self.assertRaises(exceptions.EqualVersionNumberError):
+            self.trusted_set.update_timestamp((self.metadata[Timestamp.type]))
+
+        # Every object has a unique id() if they are equal, this means timestamp
+        # was not updated.
+        self.assertEqual(id(initial_timestamp), id(self.trusted_set.timestamp))
 
     def test_update_timestamp_snapshot_ver_below_current(self) -> None:
         def bump_snapshot_version(timestamp: Timestamp) -> None:
             timestamp.snapshot_meta.version = 2
+            # The timestamp version must be increased to initiate a update.
+            timestamp.version += 1
 
         # set current known snapshot.json version to 2
         timestamp = self.modify_metadata(Timestamp.type, bump_snapshot_version)
         self.trusted_set.update_timestamp(timestamp)
 
         # newtimestamp.meta.version < trusted_timestamp.meta.version
-        with self.assertRaises(exceptions.ReplayedMetadataError):
+        with self.assertRaises(exceptions.BadVersionNumberError):
             self.trusted_set.update_timestamp(self.metadata[Timestamp.type])
 
     def test_update_timestamp_expired(self) -> None:
@@ -377,6 +398,8 @@ class TestTrustedMetadataSet(unittest.TestCase):
     def test_update_snapshot_successful_rollback_checks(self) -> None:
         def meta_version_bump(timestamp: Timestamp) -> None:
             timestamp.snapshot_meta.version += 1
+            # The timestamp version must be increased to initiate a update.
+            timestamp.version += 1
 
         def version_bump(snapshot: Snapshot) -> None:
             snapshot.version += 1
