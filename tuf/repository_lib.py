@@ -1997,10 +1997,6 @@ def sign_metadata(metadata_object, keyids, filename, repository_name):
                                                           repository_name=repository_name)
 
     # # Generate the signature using the appropriate signing method.
-    # if key['keytype'] in SUPPORTED_KEY_TYPES:
-    #   # If private key is loaded with `load_signing_key`
-    #   
-    #   if 'private' in key['keyval'] and key['keyval']['private']:
     key = keydb.get_key(keyid, repository_name=repository_name)
     # Generate the signature using the appropriate signing method.
     if key['keytype'] in SUPPORTED_KEY_TYPES:
