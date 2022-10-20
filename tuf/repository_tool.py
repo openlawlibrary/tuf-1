@@ -907,7 +907,7 @@ class Metadata(object):
                         repository_name=self._repository_name,
                         signature_provider=signature_provider)
 
-    except securesystemslib.exceptions.KeyAlreadyExistsError:
+    except tuf.exceptions.KeyAlreadyExistsError:
       keydb.remove_key(key['keyid'], self._repository_name)
       keydb.add_key(key,
                         repository_name=self._repository_name,
