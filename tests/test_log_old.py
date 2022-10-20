@@ -20,22 +20,20 @@
   Unit test for 'log.py'.
 """
 
+import importlib
 import logging
-import unittest
 import os
 import shutil
 import sys
-import importlib
-
-import tuf
-import tuf.log
-import tuf.settings
+import unittest
 
 import securesystemslib
 import securesystemslib.util
 
+import tuf
+import tuf.log
+import tuf.settings
 from tests import utils
-
 
 # We explicitly create a logger which is a child of the tuf hierarchy,
 # instead of using the standard getLogger(__name__) pattern, because the

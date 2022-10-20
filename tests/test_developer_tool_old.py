@@ -21,27 +21,24 @@
   Unit test for the 'developer_tool.py' module.
 """
 
-import os
-import unittest
 import logging
-import tempfile
+import os
 import shutil
 import sys
-
-import tuf
-import tuf.log
-import tuf.roledb
-import tuf.keydb
-import tuf.developer_tool as developer_tool
-import tuf.exceptions
+import tempfile
+import unittest
 
 import securesystemslib
 import securesystemslib.exceptions
 
-from tuf.developer_tool import METADATA_DIRECTORY_NAME
-from tuf.developer_tool import TARGETS_DIRECTORY_NAME
-
+import tuf
+import tuf.developer_tool as developer_tool
+import tuf.exceptions
+import tuf.keydb
+import tuf.log
+import tuf.roledb
 from tests import utils
+from tuf.developer_tool import METADATA_DIRECTORY_NAME, TARGETS_DIRECTORY_NAME
 
 logger = logging.getLogger(__name__)
 

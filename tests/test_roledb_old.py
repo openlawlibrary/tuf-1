@@ -20,20 +20,19 @@
   Unit test for 'roledb.py'.
 """
 
-import unittest
 import logging
 import sys
-
-import tuf
-import tuf.formats
-import tuf.roledb
-import tuf.exceptions
-import tuf.log
-
-from tests import utils
+import unittest
 
 import securesystemslib
 import securesystemslib.keys
+
+import tuf
+import tuf.exceptions
+import tuf.formats
+import tuf.log
+import tuf.roledb
+from tests import utils
 
 logger = logging.getLogger(__name__)
 

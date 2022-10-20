@@ -21,25 +21,24 @@
 """
 
 
-import os
 import logging
-import tempfile
+import os
 import shutil
-import unittest
 import sys
-
-import tuf
-import tuf.log
-import tuf.formats
-import tuf.exceptions
-import tuf.roledb
-import tuf.keydb
-import tuf.repository_tool as repo_tool
-
-from tests import utils
+import tempfile
+import unittest
 
 import securesystemslib
 import securesystemslib.storage
+
+import tuf
+import tuf.exceptions
+import tuf.formats
+import tuf.keydb
+import tuf.log
+import tuf.repository_tool as repo_tool
+import tuf.roledb
+from tests import utils
 
 logger = logging.getLogger(__name__)
 

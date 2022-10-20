@@ -20,27 +20,26 @@
   Unit test for 'repository_tool.py'.
 """
 
-import os
-import time
 import datetime
-import unittest
 import logging
-import tempfile
+import os
 import shutil
 import sys
-
-import tuf
-import tuf.log
-import tuf.formats
-import tuf.roledb
-import tuf.keydb
-import tuf.repository_tool as repo_tool
-
-from tests import utils
+import tempfile
+import time
+import unittest
 
 import securesystemslib
 import securesystemslib.exceptions
 import securesystemslib.storage
+
+import tuf
+import tuf.formats
+import tuf.keydb
+import tuf.log
+import tuf.repository_tool as repo_tool
+import tuf.roledb
+from tests import utils
 
 logger = logging.getLogger(__name__)
 

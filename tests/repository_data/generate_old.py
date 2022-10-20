@@ -26,14 +26,14 @@
   change in some way.
 """
 
-import shutil
 import datetime
 import optparse
+import shutil
 import stat
 
-from tuf.repository_tool import *
-
 import securesystemslib
+
+from tuf.repository_tool import *
 
 parser = optparse.OptionParser()
 parser.add_option(

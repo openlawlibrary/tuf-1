@@ -21,9 +21,9 @@
   interval 'DELAY').  The server is used in 'test_slow_retrieval_attack_old.py'.
 """
 
+import http.server
 import os
 import time
-import http.server
 
 
 # HTTP request handler.

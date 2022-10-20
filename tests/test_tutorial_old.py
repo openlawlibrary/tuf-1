@@ -22,22 +22,20 @@
 """
 
 
-import unittest
 import datetime  # part of TUTORIAL.md
 import os  # part of TUTORIAL.md, but also needed separately
 import shutil
-import tempfile
 import sys
+import tempfile
+import unittest
 import unittest.mock as mock
 
-from tuf.repository_tool import *  # part of TUTORIAL.md
-
-from tests import utils
-
 import securesystemslib.exceptions
-
 from securesystemslib.formats import encode_canonical  # part of TUTORIAL.md
 from securesystemslib.keys import create_signature  # part of TUTORIAL.md
+
+from tests import utils
+from tuf.repository_tool import *  # part of TUTORIAL.md
 
 
 class TestTutorial(unittest.TestCase):

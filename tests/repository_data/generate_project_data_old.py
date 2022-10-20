@@ -21,14 +21,14 @@
   'test_developer_tool_old.py' test cases.
 """
 
-import shutil
 import datetime
 import optparse
 import os
-
-from tuf.developer_tool import *
+import shutil
 
 import securesystemslib
+
+from tuf.developer_tool import *
 
 parser = optparse.OptionParser()
 

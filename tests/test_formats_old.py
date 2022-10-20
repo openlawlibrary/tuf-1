@@ -20,18 +20,17 @@
   Unit test for 'formats.py'
 """
 
-import unittest
 import datetime
-import sys
 import os
-
-import tuf
-import tuf.formats
-
-from tests import utils
+import sys
+import unittest
 
 import securesystemslib
 import securesystemslib.util
+
+import tuf
+import tuf.formats
+from tests import utils
 
 
 class TestFormats(unittest.TestCase):

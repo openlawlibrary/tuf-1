@@ -21,23 +21,22 @@
   Test cases for sig.py.
 """
 
-import unittest
-import logging
 import copy
+import logging
 import sys
-
-import tuf
-import tuf.log
-import tuf.formats
-import tuf.keydb
-import tuf.roledb
-import tuf.sig
-import tuf.exceptions
-
-from tests import utils
+import unittest
 
 import securesystemslib
 import securesystemslib.keys
+
+import tuf
+import tuf.exceptions
+import tuf.formats
+import tuf.keydb
+import tuf.log
+import tuf.roledb
+import tuf.sig
+from tests import utils
 
 logger = logging.getLogger(__name__)
 

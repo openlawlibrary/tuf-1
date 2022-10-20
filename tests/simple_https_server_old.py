@@ -29,10 +29,10 @@
     http://docs.python.org/library/simplehttpserver.html#module-SimpleHTTPServer
 """
 
-import sys
-import ssl
-import os
 import http.server
+import os
+import ssl
+import sys
 
 keyfile = os.path.join("ssl_certs", "ssl_cert.key")
 certfile = os.path.join("ssl_certs", "ssl_cert.crt")

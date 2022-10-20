@@ -20,13 +20,12 @@
   Test cases for unittest_toolbox.py.
 """
 
-import unittest
 import logging
 import shutil
 import sys
+import unittest
 
 import tuf.unittest_toolbox as unittest_toolbox
-
 from tests import utils
 
 logger = logging.getLogger(__name__)

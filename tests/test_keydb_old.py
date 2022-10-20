@@ -20,17 +20,17 @@
   Unit test for 'keydb.py'.
 """
 
-import unittest
 import logging
 import sys
+import unittest
+
+import securesystemslib.keys
+import securesystemslib.settings
 
 import tuf
 import tuf.formats
-import securesystemslib.keys
-import securesystemslib.settings
 import tuf.keydb
 import tuf.log
-
 from tests import utils
 
 logger = logging.getLogger(__name__)
