@@ -5,8 +5,8 @@ Note: Development of TUF occurs on the "develop" branch of this repository.
 
 Contributions can be made by submitting GitHub pull requests.  Submitted code
 should follow our `code style guidelines
-<https://github.com/secure-systems-lab/code-style-guidelines>`_, which provide
-examples of what to do (or not to do) when writing Python code.
+<https://github.com/secure-systems-lab/code-style-guidelines>`_, which are
+enforced with linters and auto-formatters (details below).
 
 Contributors must also indicate acceptance of the `Developer Certificate of
 Origin <https://developercertificate.org/>`_  (DCO) when making a contribution
@@ -79,46 +79,123 @@ and instructions for installing locally from source are provided here:
     $ curl -O https://pypi.python.org/packages/source/v/virtualenv/virtualenv-15.0.3.tar.gz
     $ tar xvfz virtualenv-15.0.3.tar.gz
     $ cd virtualenv-15.0.3
-    $ python virtualenv.py myVE
+    $ python3 virtualenv.py myVE
 
-External Dependencies
-=====================
-
-Before installing TUF, a couple of its Python dependencies have non-Python dependencies
-of their own that should installed first.  PyCrypto and PyNaCl (third-party dependencies
-needed by the repository tools) require Python and FFI (Foreign Function Interface)
-development header files. Debian-based distributions can install these header
-libraries with apt (Advanced Package Tool.)
-::
-
-    $ apt-get install build-essential libssl-dev libffi-dev python-dev
-
-Fedora-based distributions can install these libraries with dnf.
-::
-
-    $ dnf install libffi-devel redhat-rpm-config openssl-devel
-
-OS X users can install these header libraries with the `Homebrew <https://brew.sh/>`_ package manager.
-::
-
-    $ brew install python
-    $ brew install libffi
 
 Development Installation
 ========================
 
-Installation of minimal, optional, development, and testing requirements
-can then be accomplished with one command:
+To work on the TUF project, it's best to perform a development install.
+
+1. First, `install non-Python dependencies <INSTALLATION.rst#non-python-dependencies>`_.
+
+2. Then clone this repository:
+
 ::
 
-    $ pip install -r dev-requirements.txt
+    $ git clone https://github.com/theupdateframework/python-tuf
+
+3. Then perform a full, editable/development install.  This will include all
+   optional cryptographic support, the testing/linting dependencies, etc.
+   With a development installation, modifications to the code in the current
+   directory will affect the installed version of TUF.
+
+::
+
+    $ python3 -m pip install -r requirements-dev.txt
+
+
+Auto-formatting
+===============
+
+CI/CD will check that new TUF code is formatted with `black
+<https://black.readthedocs.io/>`__ and `isort <https://pycqa.github.io/isort>`__.
+Auto-formatting can be done on the command line:
+::
+
+    $ black <filename>
+    $ isort <filename>
+
+or via source code editor plugin
+[`black <https://black.readthedocs.io/en/stable/editor_integration.html>`__,
+`isort <https://github.com/pycqa/isort/wiki/isort-Plugins>`__] or
+`pre-commit <https://pre-commit.com/>`__-powered git hooks
+[`black <https://black.readthedocs.io/en/stable/version_control_integration.html>`__,
+`isort <https://pycqa.github.io/isort/docs/configuration/pre-commit/>`__].
+
 
 Testing
 =======
 
-The Update Framework's unit tests can be executed by invoking
-`tox <https://testrun.org/tox/>`_. All supported Python versions are
-tested, but must already be installed locally.
+The Update Framework's unit test suite can be executed by invoking the test
+aggregation script inside the *tests* subdirectory. ``tuf`` and its
+dependencies must already be installed (see above).
+::
+
+    $ cd tests
+    $ python3 aggregate_tests.py
+
+Individual tests can also be executed. Optional '-v' flags can be added to
+increase log level up to DEBUG ('-vvvv').
+::
+
+    $ python3 test_updater_ng.py # run a specific test file
+    $ python3 test_updater_ng.py TestUpdater.test_refresh_and_download # run a specific test
+    $ python3 test_updater_ng.py -vvvv TestUpdater.test_refresh_and_download # run test with DEBUG log level
+
+
+All of the log levels and the corresponding options that could be used for testing are:
+
+.. list-table::
+   :widths: 20 25
+   :header-rows: 1
+
+   * - Option
+     - Log Level
+   * - default (no argument passed)
+     - ERROR (test names are not printed)
+   * - `-v`
+     - ERROR (test names are printed at this level and above)
+   * - `-vv`
+     - WARNING
+   * - `-vvv`
+     - INFO
+   * - `-vvvv`
+     - DEBUG
+
+
+To run the tests and measure their code coverage, the aggregation script can be
+invoked with the ``coverage`` tool (requires installation of ``coverage``, e.g.
+via PyPI).
+::
+
+    $ coverage run aggregate_tests.py && coverage report
+
+
+To develop and test ``tuf`` with above commands alongside its in-house dependency
+`securesystemslib <https://github.com/secure-systems-lab/securesystemslib>`_,
+it is recommended to first make an editable install of ``tuf`` (in
+a *venv*), and then install ``securesystemslib`` in editable mode too (in the same *venv*).
+::
+
+    $ cd path/to/tuf
+    $ python3 -m pip install -r requirements-dev.txt
+    $ cd path/to/securesystemslib
+    $ python3 -m pip install -r requirements-dev.txt
+
+
+With `tox <https://testrun.org/tox/>`_ the test suite can be executed in a
+separate *venv* for each supported Python version. While the supported
+Python versions must already be available, ``tox`` will install ``tuf`` and its
+dependencies anew in each environment.
 ::
 
     $ tox
+
+
+An additional non-default ``tox`` environment is available and can be used to
+test ``tuf`` against the tip of development of ``securesystemslib`` on GitHub,
+to e.g. prepare the former for a new release of the latter.
+::
+
+    $ tox -e with-sslib-master

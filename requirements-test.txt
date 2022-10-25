@@ -1,0 +1,13 @@
+# Install requirements needed in each tox environment
+
+# pinned tuf runtime dependencies (should auto-update and -trigger ci/cd)
+-r requirements-pinned.txt
+
+# additional test tools for linting and coverage measurement
+coverage
+black
+isort
+pylint
+mypy
+bandit
+types-requests
