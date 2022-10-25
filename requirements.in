@@ -1,9 +1,0 @@
-# requirements.in for pip-compile.
-
-securesystemslib
-cryptography
-colorama
-pynacl
-requests
-six
-iso8601

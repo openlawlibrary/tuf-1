@@ -19,7 +19,7 @@ in TUF metadata.
 
 The following demonstration requires and operates on the repository created in
 the [repository management
-tutorial](https://github.com/theupdateframework/tuf/blob/develop/tuf/README.md).
+tutorial](https://github.com/theupdateframework/python-tuf/blob/develop/tuf/README.md).
 
 ### Arbitrary Package Attack ###
 In an arbitrary package attack, an  attacker installs anything they want on the
@@ -42,7 +42,7 @@ $ rm -rf "client/targets/" "client/metadata/current/timestamp.json"
 The client now performs an update and should detect the invalid target file...
 Note: The following command should be executed in the "client/" directory.
 ```Bash
-$ python basic_client.py --repo http://localhost:8001
+$ python3 basic_client.py --repo http://localhost:8001
 Error: No working mirror was found:
   localhost:8001: BadHashError()
 ```
@@ -80,7 +80,7 @@ indicates when metadata should no longer be trusted.
 In the following simulation, the client first tries to perform an update.
 
 ```Bash
-$ python basic_client.py --repo http://localhost:8001
+$ python3 basic_client.py --repo http://localhost:8001
 ```
 
 According to the logger (`tuf.log` file in the current working directory),
@@ -95,7 +95,7 @@ should no longer be trusted.
 $ sudo date -s '2080-12-25 12:34:56'
 Wed Dec 25 12:34:56 EST 2080
 
-$ python basic_client.py --repo http://localhost:8001
+$ python3 basic_client.py --repo http://localhost:8001
 Error: No working mirror was found:
   u'localhost:8001': ExpiredMetadataError(u"Metadata u'root' expired on Tue Jan  1 00:00:00 2030 (UTC).",)
 ```
@@ -119,7 +119,7 @@ $ cp repository/metadata/timestamp.json /tmp
 
 We should next generate a new Timestamp file on the repository side.
 ```Bash
-$ python
+$ python3
 >>> from tuf.repository_tool import *
 >>> repository = load_repository('repository')
 >>> repository.timestamp.version
@@ -138,12 +138,12 @@ $ cp repository/metadata.staged/* repository/metadata
 Now start the HTTP server from the directory containing the 'repository'
 subdirectory.
 ```Bash
-$ python -m SimpleHTTPServer 8001
+$ python3 -m SimpleHTTPServer 8001
 ```
 
 And perform an update so that the client retrieves the updated timestamp.json.
 ```Bash
-$ python basic_client.py --repo http://localhost:8001
+$ python3 basic_client.py --repo http://localhost:8001
 ```
 
 Finally, move the previous timestamp.json file to the current live repository
@@ -151,12 +151,12 @@ and have the client try to download the outdated version.  The client should
 reject it!
 ```Bash
 $ cp /tmp/timestamp.json repository/metadata/
-$ cd repository; python -m SimpleHTTPServer 8001
+$ cd repository; python3 -m SimpleHTTPServer 8001
 ```
 
 On the client side, perform an update...
 ```Bash
-$ python basic_client.py --repo http://localhost:8001
+$ python3 basic_client.py --repo http://localhost:8001
 Error: No working mirror was found:
   u'localhost:8001': ReplayedMetadataError()
 ```
@@ -180,7 +180,7 @@ requested target file (according to what is listed in trusted TUF metadata).
 
 ```Bash
 $ cp repository/targets/file1.txt /tmp
-$ python -c "print 'a' * 1000" >> repository/targets/file1.txt
+$ python3 -c "print 'a' * 1000" >> repository/targets/file1.txt
 ```
 
 Now delete the local metadata and target files on the client side so
@@ -195,12 +195,12 @@ expected size, and no more.  The target file available on the software
 repository does contain more data than expected, though.
 
 ```Bash
-$ python basic_client.py --repo http://localhost:8001
+$ python3 basic_client.py --repo http://localhost:8001
 ```
 
 At this point, part of the "file1.txt" file should have been fetched.  That is,
 up to 31 bytes of it should have been downloaded, and the rest of the maliciously
-appended data ignored.  If we inspect the logger, we'd disover the following:
+appended data ignored.  If we inspect the logger, we'd discover the following:
 
 ```Bash
 [2016-10-06 21:37:39,092 UTC] [tuf.download] [INFO] [_download_file:235@download.py]
@@ -243,7 +243,7 @@ keys.  The client should reject the partially signed snapshot file served by
 the repository (or imagine that it is a compromised software repository).
 
 ```Bash
-$ python
+$ python3
 >>> from tuf.repository_tool import *
 >>> repository = load_repository('repository')
 >>> version = repository.root.version
@@ -273,7 +273,7 @@ The client now attempts to refresh the top-level metadata and the
 partially written snapshot.json, which should be rejected.
 
 ```Bash
-$ python basic_client.py --repo http://localhost:8001
+$ python3 basic_client.py --repo http://localhost:8001
 Error: No working mirror was found:
   u'localhost:8001': BadSignatureError()
 ```
@@ -289,14 +289,14 @@ exception or error when it detects that a malicious server is serving it data
 at a slow enough rate.
 
 We first spawn the server that slowly streams data to the client.  The
-'slow_retrieval_server.py' module (can be found in the tests/ directory of the
+'slow_retrieval_server_old.py' module (can be found in the tests/ directory of the
 source code) should be copied over to the server's 'repository/' directory from
 which to launch it.
 
 ```Bash
-# Before launching the slow retrieval server, copy 'slow_retrieval_server.py'
+# Before launching the slow retrieval server, copy 'slow_retrieval_server_old.py'
 # to the 'repository/' directory and run it from that directory as follows:
-$ python slow_retrieval_server.py 8002 mode_2
+$ python3 slow_retrieval_server_old.py 8002 mode_2
 ```
 
 The client may now make a request to the slow retrieval server on port 8002.
@@ -307,7 +307,7 @@ This should make it so that the client detects the slow retrieval server's
 delayed streaming.
 
 ```Bash
-$ python basic_client.py --verbose 1 --repo http://localhost:8002
+$ python3 basic_client.py --verbose 1 --repo http://localhost:8002
 Error: No working mirror was found:
   u'localhost:8002': SlowRetrievalError()
 ```
@@ -319,5 +319,5 @@ SlowRetrievalError exception to the client application.
 ## Conclusion ##
 These are just some of the attacks that TUF provides protection against.  For
 more attacks and updater weaknesses, please see the
-[Security](https://github.com/theupdateframework/tuf/blob/develop/docs/SECURITY.md)
+[Security](https://github.com/theupdateframework/python-tuf/blob/develop/docs/SECURITY.md)
 page.

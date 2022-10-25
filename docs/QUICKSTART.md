@@ -15,7 +15,7 @@ how TUF works, however.  It will serve as a very basic update system.
 
 Make sure that TUF is installed, along with some of the optional cryptographic
 libraries and C extensions.  Try this command to do that:
-`pip install securesystemslib[crypto,pynacl] tuf`
+`python3 -m pip install securesystemslib[colors,crypto,pynacl] tuf`
 
 If you run into errors during that pip command, please consult the more
 detailed [TUF Installation Instructions](INSTALLATION.rst).  (There are some
@@ -81,10 +81,6 @@ repository's metadata.
 ```Bash
 $ cd "tufrepo/"
 $ python3 -m http.server 8001
-
-# or, if you are using Python2:
-$ python -m SimpleHTTPServer 8001
-
 ```
 
 **Step (4)** - Obtain and verify the `testfile` update on a client.
@@ -148,6 +144,6 @@ workflow.
 
 Please provide feedback or questions for this or other tutorials, or
 TUF in general, by checking out
-[our contact info](https://github.com/theupdateframework/tuf#contact), or
-creating [issues](https://github.com/theupdateframework/tuf/issues) in this
+[our contact info](https://github.com/theupdateframework/python-tuf#contact), or
+creating [issues](https://github.com/theupdateframework/python-tuf/issues) in this
 repository!

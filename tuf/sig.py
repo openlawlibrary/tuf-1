@@ -40,42 +40,43 @@
   is also a function for that.
 """
 
-# Help with Python 3 compatibility, where the print statement is a function, an
-# implicit relative import is invalid, and the '/' operator performs true
-# division.  Example:  print 'hello world' raises a 'SyntaxError' exception.
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import unicode_literals
-
 import logging
 
-import tuf
-import tuf.keydb
-import tuf.roledb
-import tuf.formats
+import securesystemslib # pylint: disable=unused-import
+from securesystemslib import exceptions as sslib_exceptions
+from securesystemslib import formats as sslib_formats
+from securesystemslib import keys as sslib_keys
 
-import securesystemslib
+from tuf import exceptions
+from tuf import formats
+from tuf import keydb
+from tuf import roledb
 
 # See 'log.py' to learn how logging is handled in TUF.
-logger = logging.getLogger('tuf.sig')
-
-# Disable 'iso8601' logger messages to prevent 'iso8601' from clogging the
-# log file.
-iso8601_logger = logging.getLogger('iso8601')
-iso8601_logger.disabled = True
-
+logger = logging.getLogger(__name__)
 
 def get_signature_status(signable, role=None, repository_name='default',
     threshold=None, keyids=None):
   """
   <Purpose>
     Return a dictionary representing the status of the signatures listed in
-    'signable'.  Given an object conformant to SIGNABLE_SCHEMA, a set of public
-    keys in 'tuf.keydb', a set of roles in 'tuf.roledb', and a role,
-    the status of these signatures can be determined.  This method will iterate
-    the signatures in 'signable' and enumerate all the keys that are valid,
-    invalid, unrecognized, or unauthorized.
+    'signable'. Signatures in the returned dictionary are identified by the
+    signature keyid and can have a status of either:
+
+    * bad -- Invalid signature
+    * good -- Valid signature from key that is available in 'tuf.keydb', and is
+      authorized for the passed role as per 'roledb' (authorization may be
+      overwritten by passed 'keyids').
+    * unknown -- Signature from key that is not available in 'tuf.keydb', or if
+      'role' is None.
+    * unknown signing schemes -- Signature from key with unknown signing
+      scheme.
+    * untrusted -- Valid signature from key that is available in 'tuf.keydb',
+      but is not trusted for the passed role as per 'roledb' or the passed
+      'keyids'.
+
+    NOTE: The result may contain duplicate keyids or keyids that reference the
+    same key, if 'signable' lists multiple signatures from the same key.
 
   <Arguments>
     signable:
@@ -87,19 +88,19 @@ def get_signature_status(signable, role=None, repository_name='default',
       Conformant to tuf.formats.SIGNABLE_SCHEMA.
 
     role:
-      TUF role (e.g., 'root', 'targets', 'snapshot').
+      TUF role string (e.g. 'root', 'targets', 'snapshot' or timestamp).
 
     threshold:
-      Rather than reference the role's threshold as set in tuf.roledb.py, use
+      Rather than reference the role's threshold as set in roledb, use
       the given 'threshold' to calculate the signature status of 'signable'.
       'threshold' is an integer value that sets the role's threshold value, or
-      the miminum number of signatures needed for metadata to be considered
+      the minimum number of signatures needed for metadata to be considered
       fully signed.
 
     keyids:
       Similar to the 'threshold' argument, use the supplied list of 'keyids'
       to calculate the signature status, instead of referencing the keyids
-      in tuf.roledb.py for 'role'.
+      in roledb for 'role'.
 
   <Exceptions>
     securesystemslib.exceptions.FormatError, if 'signable' does not have the
@@ -119,36 +120,20 @@ def get_signature_status(signable, role=None, repository_name='default',
   # arguments have the appropriate number of objects and object types, and that
   # all dict keys are properly named.  Raise
   # 'securesystemslib.exceptions.FormatError' if the check fails.
-  tuf.formats.SIGNABLE_SCHEMA.check_match(signable)
-  securesystemslib.formats.NAME_SCHEMA.check_match(repository_name)
+  formats.SIGNABLE_SCHEMA.check_match(signable)
+  sslib_formats.NAME_SCHEMA.check_match(repository_name)
 
   if role is not None:
-    tuf.formats.ROLENAME_SCHEMA.check_match(role)
+    formats.ROLENAME_SCHEMA.check_match(role)
 
   if threshold is not None:
-    securesystemslib.formats.THRESHOLD_SCHEMA.check_match(threshold)
+    formats.THRESHOLD_SCHEMA.check_match(threshold)
 
   if keyids is not None:
-    securesystemslib.formats.KEYIDS_SCHEMA.check_match(keyids)
+    sslib_formats.KEYIDS_SCHEMA.check_match(keyids)
 
   # The signature status dictionary returned.
   signature_status = {}
-
-  # The fields of the signature_status dict, where each field stores keyids.  A
-  # description of each field:
-  #
-  # good_sigs = keys confirmed to have produced 'sig' using 'signed', which are
-  # associated with 'role';
-  #
-  # bad_sigs = negation of good_sigs;
-  #
-  # unknown_sigs = keys not found in the 'keydb' database;
-  #
-  # untrusted_sigs = keys that are not in the list of keyids associated with
-  # 'role';
-  #
-  # unknown_signing_scheme = signing schemes specified in keys that are
-  # unsupported;
   good_sigs = []
   bad_sigs = []
   unknown_sigs = []
@@ -157,7 +142,7 @@ def get_signature_status(signable, role=None, repository_name='default',
 
   # Extract the relevant fields from 'signable' that will allow us to identify
   # the different classes of keys (i.e., good_sigs, bad_sigs, etc.).
-  signed = signable['signed']
+  signed = sslib_formats.encode_canonical(signable['signed']).encode('utf-8')
   signatures = signable['signatures']
 
   # Iterate the signatures and enumerate the signature_status fields.
@@ -167,17 +152,17 @@ def get_signature_status(signable, role=None, repository_name='default',
 
     # Does the signature use an unrecognized key?
     try:
-      key = tuf.keydb.get_key(keyid, repository_name)
+      key = keydb.get_key(keyid, repository_name)
 
-    except securesystemslib.exceptions.UnknownKeyError:
+    except exceptions.UnknownKeyError:
       unknown_sigs.append(keyid)
       continue
 
     # Does the signature use an unknown/unsupported signing scheme?
     try:
-      valid_sig = securesystemslib.keys.verify_signature(key, signature, signed)
+      valid_sig = sslib_keys.verify_signature(key, signature, signed)
 
-    except securesystemslib.exceptions.UnsupportedAlgorithmError:
+    except sslib_exceptions.UnsupportedAlgorithmError:
       unknown_signing_schemes.append(keyid)
       continue
 
@@ -189,7 +174,7 @@ def get_signature_status(signable, role=None, repository_name='default',
         # Note that if the role is not known, tuf.exceptions.UnknownRoleError
         # is raised here.
         if keyids is None:
-          keyids = tuf.roledb.get_role_keyids(role, repository_name)
+          keyids = roledb.get_role_keyids(role, repository_name)
 
         if keyid not in keyids:
           untrusted_sigs.append(keyid)
@@ -208,13 +193,12 @@ def get_signature_status(signable, role=None, repository_name='default',
       bad_sigs.append(keyid)
 
   # Retrieve the threshold value for 'role'.  Raise
-  # securesystemslib.exceptions.UnknownRoleError if we were given an invalid
-  # role.
+  # tuf.exceptions.UnknownRoleError if we were given an invalid role.
   if role is not None:
     if threshold is None:
       # Note that if the role is not known, tuf.exceptions.UnknownRoleError is
       # raised here.
-      threshold = tuf.roledb.get_role_threshold(
+      threshold = roledb.get_role_threshold(
           role, repository_name=repository_name)
 
     else:
@@ -241,33 +225,40 @@ def verify(signable, role, repository_name='default', threshold=None,
     keyids=None):
   """
   <Purpose>
-    Verify whether the authorized signatures of 'signable' meet the minimum
-    required by 'role'.  Authorized signatures are those with valid keys
-    associated with 'role'.  'signable' must conform to SIGNABLE_SCHEMA
-    and 'role' must not equal 'None' or be less than zero.
+    Verify that 'signable' has a valid threshold of authorized signatures
+    identified by unique keyids. The threshold and whether a keyid is
+    authorized is determined by querying the 'threshold' and 'keyids' info for
+    the passed 'role' in 'roledb'. Both values can be overwritten by
+    passing the 'threshold' or 'keyids' arguments.
+
+    NOTE:
+    - Signatures with identical authorized keyids only count towards the
+      threshold once.
+    - Signatures with the same key only count toward the threshold once.
 
   <Arguments>
     signable:
-      A dictionary containing a list of signatures and a 'signed' identifier.
+      A dictionary containing a list of signatures and a 'signed' identifier
+      that conforms to SIGNABLE_SCHEMA, e.g.:
       signable = {'signed':, 'signatures': [{'keyid':, 'method':, 'sig':}]}
 
     role:
-      TUF role (e.g., 'root', 'targets', 'snapshot').
+      TUF role string (e.g. 'root', 'targets', 'snapshot' or timestamp).
 
     threshold:
-      Rather than reference the role's threshold as set in tuf.roledb.py, use
+      Rather than reference the role's threshold as set in roledb, use
       the given 'threshold' to calculate the signature status of 'signable'.
       'threshold' is an integer value that sets the role's threshold value, or
-      the miminum number of signatures needed for metadata to be considered
+      the minimum number of signatures needed for metadata to be considered
       fully signed.
 
     keyids:
       Similar to the 'threshold' argument, use the supplied list of 'keyids'
       to calculate the signature status, instead of referencing the keyids
-      in tuf.roledb.py for 'role'.
+      in roledb for 'role'.
 
   <Exceptions>
-    securesystemslib.exceptions.UnknownRoleError, if 'role' is not recognized.
+    tuf.exceptions.UnknownRoleError, if 'role' is not recognized.
 
     securesystemslib.exceptions.FormatError, if 'signable' is not formatted
     correctly.
@@ -279,16 +270,16 @@ def verify(signable, role, repository_name='default', threshold=None,
     get_signature_status() will be caught here and re-raised.
 
   <Returns>
-    Boolean.  True if the number of good signatures >= the role's threshold,
-    False otherwise.
+    Boolean.  True if the number of good unique (by keyid) signatures >= the
+    role's threshold, False otherwise.
   """
 
-  tuf.formats.SIGNABLE_SCHEMA.check_match(signable)
-  tuf.formats.ROLENAME_SCHEMA.check_match(role)
-  securesystemslib.formats.NAME_SCHEMA.check_match(repository_name)
+  formats.SIGNABLE_SCHEMA.check_match(signable)
+  formats.ROLENAME_SCHEMA.check_match(role)
+  sslib_formats.NAME_SCHEMA.check_match(repository_name)
 
   # Retrieve the signature status.  tuf.sig.get_signature_status() raises:
-  # securesystemslib.exceptions.UnknownRoleError
+  # tuf.exceptions.UnknownRoleError
   # securesystemslib.exceptions.FormatError.  'threshold' and 'keyids' are also
   # validated.
   status = get_signature_status(signable, role, repository_name, threshold, keyids)
@@ -302,9 +293,14 @@ def verify(signable, role, repository_name='default', threshold=None,
   # Note: get_signature_status() is expected to verify that 'threshold' is
   # not None or <= 0.
   if threshold is None or threshold <= 0: #pragma: no cover
-    raise securesystemslib.exceptions.Error("Invalid threshold: " + repr(threshold))
+    raise sslib_exceptions.Error("Invalid threshold: " + repr(threshold))
 
-  return len(good_sigs) >= threshold
+  unique_keys = set()
+  for keyid in good_sigs:
+    key = keydb.get_key(keyid, repository_name)
+    unique_keys.add(key['keyval']['public'])
+
+  return len(unique_keys) >= threshold
 
 
 
@@ -315,7 +311,7 @@ def may_need_new_keys(signature_status):
   <Purpose>
     Return true iff downloading a new set of keys might tip this
     signature status over to valid.  This is determined by checking
-    if either the number of unknown or untrused keys is > 0.
+    if either the number of unknown or untrusted keys is > 0.
 
   <Arguments>
     signature_status:
@@ -336,7 +332,7 @@ def may_need_new_keys(signature_status):
   # This check will ensure 'signature_status' has the appropriate number
   # of objects and object types, and that all dict keys are properly named.
   # Raise 'securesystemslib.exceptions.FormatError' if the check fails.
-  securesystemslib.formats.SIGNATURESTATUS_SCHEMA.check_match(signature_status)
+  formats.SIGNATURESTATUS_SCHEMA.check_match(signature_status)
 
   unknown = signature_status['unknown_sigs']
   untrusted = signature_status['untrusted_sigs']
@@ -390,10 +386,10 @@ def generate_rsa_signature(signed, rsakey_dict):
 
   # We need 'signed' in canonical JSON format to generate
   # the 'method' and 'sig' fields of the signature.
-  signed = securesystemslib.formats.encode_canonical(signed)
+  signed = sslib_formats.encode_canonical(signed).encode('utf-8')
 
   # Generate the RSA signature.
   # Raises securesystemslib.exceptions.FormatError and TypeError.
-  signature = securesystemslib.keys.create_signature(rsakey_dict, signed)
+  signature = sslib_keys.create_signature(rsakey_dict, signed)
 
   return signature

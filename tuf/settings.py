@@ -23,14 +23,6 @@
  behavior.
 """
 
-# Help with Python 3 compatibility, where the print statement is a function, an
-# implicit relative import is invalid, and the '/' operator performs true
-# division.  Example:  print 'hello world' raises a 'SyntaxError' exception.
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import unicode_literals
-
 
 # Set a directory that should be used for all temporary files. If this
 # is None, then the system default will be used. The system default
@@ -87,22 +79,22 @@ MIN_AVERAGE_DOWNLOAD_SPEED = 50 #bytes/second
 # By default, limit number of delegatees we visit for any target.
 MAX_NUMBER_OF_DELEGATIONS = 2**5
 
-# This configuration is for indicating how consistent files should be created.
-# There are two options: "copy" and "hard_link".  For "copy", the consistent
-# file with be a copy of root.json.  This approach will require the most disk
-# space out of the two options.  For "hard_link", the latest root.json will be
-# a hard link to 2.root.json (for example).  This approach is more efficient in
-# terms of disk space usage.  By default, we use 'copy'.
-CONSISTENT_METHOD = 'copy'
-
 # A setting for the instances where a default hashing algorithm is needed.
 # This setting is currently used to calculate the path hash prefixes of hashed
-# bin delegations.  The other instances (e.g., digest of files) that require a
-# hashing algorithm rely on settings in the securesystemslib external library.
+# bin delegations, and digests of targets filepaths.  The other instances
+# (e.g., digest of files) that require a hashing algorithm rely on settings in
+# the securesystemslib external library.
 DEFAULT_HASH_ALGORITHM = 'sha256'
+
+# The hashing algorithms used to compute file hashes
+FILE_HASH_ALGORITHMS = ['sha256', 'sha512']
 
 # The client's update procedure (contained within a while-loop) can potentially
 # hog the CPU.  The following setting can be used to force the update sequence
 # to suspend execution for a specified amount of time.  See
 # theupdateframework/tuf/issue#338.
 SLEEP_BEFORE_ROUND = None
+
+# Maximum number of root metadata file rotations we should perform in order to
+# prevent a denial-of-service (DoS) attack.
+MAX_NUMBER_ROOT_ROTATIONS = 2**5

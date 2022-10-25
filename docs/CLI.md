@@ -3,7 +3,7 @@
 The TUF command-line interface (CLI) requires a full
 [TUF installation](INSTALLATION.rst).  Be sure to include the installation of
 extra dependencies and C extensions (
-```pip install securesystemslib[crypto,pynacl]```).
+```python3 -m pip install securesystemslib[crypto,pynacl]```).
 
 The use of the CLI is documented with examples below.
 
@@ -153,7 +153,7 @@ itself.  The --trust command-line option, in conjunction with --pubkeys and
 --role, can be used to indicate the trusted keys of a role.
 
 ```Bash
-$ repo.py --trust --pubkeys --role
+$ repo.py --trust --pubkeys </path/to/foo_key.pub> --role <rolename>
 ```
 
 For example:
@@ -279,8 +279,7 @@ Enter a password for the encrypted key (tufkeystore/mykey):
 
 Serve the repo
 ```Bash
-$ cd tufrepo/
-$ python -m SimpleHTTPServer 8001
+$ python3 -m http.server 8001
 ```
 
 ```Bash
@@ -407,8 +406,7 @@ $ repo.py --add README.txt --role role_x --sign tufkeystore/key_x tufkeystore/ke
 
 Serve the repo
 ```Bash
-$ cd tufrepo/
-$ python -m SimpleHTTPServer 8001
+$ python3 -m http.server 8001
 ```
 
 Fetch the role x's README.txt
