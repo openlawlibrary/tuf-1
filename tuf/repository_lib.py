@@ -1774,11 +1774,16 @@ def generate_snapshot_metadata(metadata_directory, version, expiration_date,
   length, hashes = _get_hashes_and_length_if_needed(use_length, use_hashes,
       os.path.join(metadata_directory, TARGETS_FILENAME), storage_backend)
 
+  root_role = ROOT_FILENAME[:-len(METADATA_EXTENSION)]
   targets_role = TARGETS_FILENAME[:-len(METADATA_EXTENSION)]
 
+  root_file_version = get_metadata_versioninfo(root_role,
+      repository_name)
   targets_file_version = get_metadata_versioninfo(targets_role,
       repository_name)
 
+  fileinfodict[ROOT_FILENAME] = formats.make_metadata_fileinfo(
+      root_file_version['version'], length, hashes)
   # Make file info dictionary with make_metadata_fileinfo because
   # in the tuf spec length and hashes are optional for all
   # METAFILES in snapshot.json including the top-level targets file.
