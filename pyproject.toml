@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "oll-tuf"
-description = "A secure updater framework for Python"
+description = "Open Law Library's fork of Python-TUF"
 readme = "README.md"
 license = { text = "MIT OR Apache-2.0" }
 requires-python = ">=3.7"
 authors = [
-  { email = "theupdateframework@googlegroups.com" },
+  { email = "info@openlawlib.org" },
 ]
 keywords = [
   "authentication",
@@ -48,10 +48,7 @@ dependencies = [
 dynamic = ["version"]
 
 [project.urls]
-Documentation = "https://theupdateframework.readthedocs.io/en/stable/"
-Homepage = "https://www.updateframework.com"
-Issues = "https://github.com/theupdateframework/python-tuf/issues"
-Source = "https://github.com/theupdateframework/python-tuf"
+
 
 [tool.hatch.version]
 path = "tuf/__init__.py"
